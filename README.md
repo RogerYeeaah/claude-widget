@@ -47,11 +47,36 @@ The script will:
 
 > **First time only:** If the build fails due to signing, open Xcode, sign in with your Apple ID, then run `./deploy.sh` again.
 
-### 3. Enable launch at login
+### 3. Install the cache refresh hook
+
+Claude Code 2.1.196+ no longer writes `~/.claude/usage-cache.json` automatically. A `Stop` hook keeps the cache fresh after each response.
+
+```bash
+cp refresh-usage-cache.sh ~/.claude/refresh-usage-cache.sh
+chmod +x ~/.claude/refresh-usage-cache.sh
+```
+
+Then add to `~/.claude/settings.json` (create if it doesn't exist):
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "bash ~/.claude/refresh-usage-cache.sh" }]
+      }
+    ]
+  }
+}
+```
+
+> The hook reads your OAuth token from the macOS Keychain and calls the Anthropic API (Haiku, 1 token). Cache is skipped if it's less than 10 minutes old.
+
+### 4. Enable launch at login
 
 Open **ClaudeWidget** from `/Applications`, then toggle **開機自動啟動** in the app window. The widget will be available as long as the app is running.
 
-### 4. Add to your desktop
+### 5. Add to your desktop
 
 1. Right-click the desktop → **Edit Widgets**
 2. Search for **Claude**
@@ -65,7 +90,9 @@ git pull && ./deploy.sh
 
 ## How it works
 
-The app runs an embedded HTTP server on `http://127.0.0.1:8787`. The widget fetches `/api/usage` and `/api/history` from it on each refresh. The server reads `~/.claude/usage-cache.json`, which Claude Code maintains automatically. No network requests to Anthropic, no API keys needed.
+The app runs an embedded HTTP server on `http://127.0.0.1:8787`. The widget fetches `/api/usage` and `/api/history` from it on each refresh. The server reads `~/.claude/usage-cache.json` on every request.
+
+**Claude Code 2.1.196+** stopped writing this file automatically. The included `Stop` hook (`refresh-usage-cache.sh`) fills the gap: after each Claude Code response it makes a minimal API call, extracts the rate-limit headers, and writes them to the cache. The hook skips the API call if the cache is less than 10 minutes old.
 
 History is accumulated in memory and saved to `~/.claude/widget-history.json` so it survives app restarts.
 

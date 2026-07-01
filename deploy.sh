@@ -33,6 +33,8 @@ fi
 
 # 5. Install + enable
 echo "Installing to /Applications..."
+pkill -x ClaudeWidget || true
+sleep 1
 rm -rf /Applications/ClaudeWidget.app
 cp -R "$DERIVED" /Applications/ClaudeWidget.app
 open /Applications/ClaudeWidget.app

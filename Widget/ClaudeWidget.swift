@@ -239,7 +239,7 @@ struct SparklineChart: View {
             }
             if let reset = lastFiveReset {
                 RuleMark(x: .value("Reset", reset))
-                    .foregroundStyle(claudeColor.opacity(0.35))
+                    .foregroundStyle(claudeColor.opacity(0.18))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
             }
         }
@@ -280,7 +280,7 @@ struct FullChart: View {
             }
             if let reset = lastFiveReset {
                 RuleMark(x: .value("5h Reset", reset))
-                    .foregroundStyle(claudeColor.opacity(0.45))
+                    .foregroundStyle(claudeColor.opacity(0.22))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 PointMark(x: .value("t", reset), y: .value("%", domain.upperBound))
                     .opacity(0)
@@ -292,7 +292,7 @@ struct FullChart: View {
             }
             if let reset = lastSevenReset {
                 RuleMark(x: .value("7d Reset", reset))
-                    .foregroundStyle(weeklyColor.opacity(0.45))
+                    .foregroundStyle(weeklyColor.opacity(0.22))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 PointMark(x: .value("t", reset), y: .value("%", domain.upperBound))
                     .opacity(0)
