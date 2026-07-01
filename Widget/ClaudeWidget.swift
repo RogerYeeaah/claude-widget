@@ -282,22 +282,24 @@ struct FullChart: View {
                 RuleMark(x: .value("5h Reset", reset))
                     .foregroundStyle(claudeColor.opacity(0.45))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .annotation(position: .overlay, alignment: .top) {
+                PointMark(x: .value("t", reset), y: .value("%", domain.upperBound))
+                    .opacity(0)
+                    .annotation(position: .bottom, alignment: .center) {
                         Text(reset, format: .dateTime.hour().minute())
                             .font(.system(size: 8))
                             .foregroundStyle(claudeColor.opacity(0.7))
-                            .padding(.top, 2)
                     }
             }
             if let reset = lastSevenReset {
                 RuleMark(x: .value("7d Reset", reset))
                     .foregroundStyle(weeklyColor.opacity(0.45))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .annotation(position: .overlay, alignment: .top) {
+                PointMark(x: .value("t", reset), y: .value("%", domain.upperBound))
+                    .opacity(0)
+                    .annotation(position: .bottom, alignment: .center) {
                         Text(reset, format: .dateTime.hour().minute())
                             .font(.system(size: 8))
                             .foregroundStyle(weeklyColor.opacity(0.7))
-                            .padding(.top, 2)
                     }
             }
         }
