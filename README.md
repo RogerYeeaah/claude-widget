@@ -44,39 +44,15 @@ The script will:
 2. Generate the Xcode project
 3. Build in Release configuration
 4. Copy to `/Applications` and register the widget
+5. Install the usage cache refresh hook into `~/.claude/`
 
 > **First time only:** If the build fails due to signing, open Xcode, sign in with your Apple ID, then run `./deploy.sh` again.
 
-### 3. Install the cache refresh hook
-
-Claude Code 2.1.196+ no longer writes `~/.claude/usage-cache.json` automatically. A `Stop` hook keeps the cache fresh after each response.
-
-```bash
-cp refresh-usage-cache.sh ~/.claude/refresh-usage-cache.sh
-chmod +x ~/.claude/refresh-usage-cache.sh
-```
-
-Then add to `~/.claude/settings.json` (create if it doesn't exist):
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [{ "type": "command", "command": "bash ~/.claude/refresh-usage-cache.sh" }]
-      }
-    ]
-  }
-}
-```
-
-> The hook reads your OAuth token from the macOS Keychain and calls the Anthropic API (Haiku, 1 token). Cache is skipped if it's less than 10 minutes old.
-
-### 4. Enable launch at login
+### 3. Enable launch at login
 
 Open **ClaudeWidget** from `/Applications`, then toggle **開機自動啟動** in the app window. The widget will be available as long as the app is running.
 
-### 5. Add to your desktop
+### 4. Add to your desktop
 
 1. Right-click the desktop → **Edit Widgets**
 2. Search for **Claude**
