@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import WidgetKit
 
 final class UsageServer {
     static let shared = UsageServer()
@@ -8,6 +9,8 @@ final class UsageServer {
     private var history: [[String: Any]] = []
     private var lastHistoryTs: Double = 0
     private let queue = DispatchQueue(label: "usage-server", qos: .utility)
+    private var cacheSource: DispatchSourceFileSystemObject?
+    private var pendingReload: DispatchWorkItem?
 
     private let usageCacheURL: URL
     private let historyFileURL: URL
@@ -44,6 +47,38 @@ final class UsageServer {
             self?.handle(conn)
         }
         listener.start(queue: queue)
+        watchCacheFile()
+    }
+
+    private func watchCacheFile() {
+        cacheSource?.cancel()
+        let fd = open(usageCacheURL.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+
+        let src = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .rename, .delete],
+            queue: queue
+        )
+        src.setEventHandler { [weak self, weak src] in
+            guard let self else { return }
+            self.scheduleWidgetReload()
+            if let events = src?.data, !events.intersection([.rename, .delete]).isEmpty {
+                self.queue.asyncAfter(deadline: .now() + 0.1) { self.watchCacheFile() }
+            }
+        }
+        src.setCancelHandler { close(fd) }
+        src.resume()
+        cacheSource = src
+    }
+
+    private func scheduleWidgetReload() {
+        pendingReload?.cancel()
+        let work = DispatchWorkItem {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+        pendingReload = work
+        queue.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     private func handle(_ connection: NWConnection) {
