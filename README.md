@@ -7,33 +7,33 @@ A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/
 - **Small, Medium, Large** widget sizes
 - Reset countdown per window (e.g. `resets in 2h 15m`)
 - Color-coded usage: normal → orange at 70% → red at 85%
-- Shows "Server offline" when the dashboard server isn't reachable
-- Updates every minute
-- **History chart** (Medium: 2h sparkline, Large: 12h dual-line chart)
+- Weekly quota uses blue to match the history chart
+- Adaptive refresh: every 2 minutes when usage ≥ 80%, every 5 minutes otherwise
+- Stale data indicator: timestamp turns orange when data is over 30 minutes old
+- Shows "Server offline" (with server icon) when the app isn't reachable
+- **History chart** (Medium: 4h sparkline, Large: 12h dual-line chart)
   - Dynamic Y-axis scaled to actual data range for clear visibility
-  - Line breaks on gaps (e.g. after server restart)
-  - History persists across server restarts (`~/.claude/widget-history.json`)
+  - Line breaks on gaps (e.g. after app restart)
+  - History persists across restarts (`~/.claude/widget-history.json`)
+- **Launch at login** toggle built into the app (no manual launchd setup)
 
 ## Requirements
 
 - macOS 14.0+
 - Xcode with your Apple ID signed in (**Xcode → Settings → Accounts**)
-- [claude-codex-usage-dashboard](https://github.com/frankchiu-dev/claude-codex-usage-dashboard) running locally on port 8787
+
+> No separate dashboard server needed — the HTTP server runs inside the app itself.
 
 ## Setup
 
-### 1. Install the dashboard server
-
-Follow the instructions at [claude-codex-usage-dashboard](https://github.com/frankchiu-dev/claude-codex-usage-dashboard) to get the local server running at `http://localhost:8787`.
-
-### 2. Clone this repo
+### 1. Clone this repo
 
 ```bash
-git clone https://github.com/RogerYeeaah/claude-usage-widget.git
-cd claude-usage-widget
+git clone https://github.com/RogerYeeaah/claude-widget.git
+cd claude-widget
 ```
 
-### 3. Deploy
+### 2. Deploy
 
 ```bash
 ./deploy.sh
@@ -46,6 +46,10 @@ The script will:
 4. Copy to `/Applications` and register the widget
 
 > **First time only:** If the build fails due to signing, open Xcode, sign in with your Apple ID, then run `./deploy.sh` again.
+
+### 3. Enable launch at login
+
+Open **ClaudeWidget** from `/Applications`, then toggle **開機自動啟動** in the app window. The widget will be available as long as the app is running.
 
 ### 4. Add to your desktop
 
@@ -61,9 +65,9 @@ git pull && ./deploy.sh
 
 ## How it works
 
-The widget fetches data from `http://127.0.0.1:8787/api/usage` and `http://127.0.0.1:8787/api/history` every minute. The dashboard server reads from `~/.claude/usage-cache.json`, which Claude Code maintains automatically. No network requests to Anthropic, no API keys needed.
+The app runs an embedded HTTP server on `http://127.0.0.1:8787`. The widget fetches `/api/usage` and `/api/history` from it on each refresh. The server reads `~/.claude/usage-cache.json`, which Claude Code maintains automatically. No network requests to Anthropic, no API keys needed.
 
-History is accumulated by the server and saved to `~/.claude/widget-history.json` so it survives restarts.
+History is accumulated in memory and saved to `~/.claude/widget-history.json` so it survives app restarts.
 
 ## Notes
 

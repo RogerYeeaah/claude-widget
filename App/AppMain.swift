@@ -27,7 +27,7 @@ struct ContentView: View {
                 .font(.headline)
             HStack(spacing: 6) {
                 Circle().fill(UsageServer.shared.isRunning ? .green : .orange).frame(width: 8, height: 8)
-                Text(UsageServer.shared.isRunning ? "Server running on :8787" : "Server running (另一實例)")
+                Text(UsageServer.shared.isRunning ? "Server running on :8787" : "Port :8787 已由另一實例使用")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

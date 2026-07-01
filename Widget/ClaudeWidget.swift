@@ -127,7 +127,9 @@ struct ClaudeProvider: TimelineProvider {
         Task {
             let usage = await UsageData.fetch()
             let entry = ClaudeEntry(date: Date(), usage: usage)
-            let next = Calendar.current.date(byAdding: .minute, value: 5, to: Date())!
+            let maxPct = [usage.claudeFive?.percent, usage.claudeSeven?.percent].compactMap { $0 }.max() ?? 0
+            let minutes = maxPct >= 80 ? 2 : 5
+            let next = Calendar.current.date(byAdding: .minute, value: minutes, to: Date())!
             completion(Timeline(entries: [entry], policy: .after(next)))
         }
     }
@@ -141,12 +143,13 @@ private let weeklyColor  = Color(red: 0.463, green: 0.498, blue: 0.776)
 struct UsageColumn: View {
     let label: String
     let window: UsageWindow?
+    var tintColor: Color = claudeColor
 
     private var pct: Double { window?.percent ?? 0 }
     private var valueColor: Color {
         if pct >= 85 { return .red }
         if pct >= 70 { return .orange }
-        return claudeColor
+        return tintColor
     }
 
     var body: some View {
@@ -299,7 +302,7 @@ struct OfflineView: View {
             HStack {
                 Spacer()
                 VStack(spacing: 6) {
-                    Image(systemName: "wifi.slash").font(.system(size: 22)).foregroundStyle(.secondary)
+                    Image(systemName: "server.rack").font(.system(size: 22)).foregroundStyle(.secondary)
                     Text("Server offline").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -312,6 +315,11 @@ struct OfflineView: View {
 }
 
 // MARK: - Widget Views
+
+private func isStale(_ fetchedAt: Date?) -> Bool {
+    guard let t = fetchedAt else { return false }
+    return -t.timeIntervalSinceNow > 1800
+}
 
 private func ageText(_ fetchedAt: Date?) -> String {
     guard let t = fetchedAt else { return "" }
@@ -328,12 +336,12 @@ struct SmallView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(claudeColor)
                 Spacer()
-                Text(ageText(entry.usage.fetchedAt)).font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text(ageText(entry.usage.fetchedAt)).font(.system(size: 11)).foregroundStyle(isStale(entry.usage.fetchedAt) ? Color.orange : Color.secondary.opacity(0.5))
             }
             .padding(.bottom, 10)
             UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
             Spacer().frame(height: 10)
-            UsageColumn(label: "Weekly", window: entry.usage.claudeSeven)
+            UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: weeklyColor)
         }
         .padding(14)
         .containerBackground(for: .widget) { Color.clear }
@@ -353,13 +361,13 @@ struct MediumView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(claudeColor)
                 Spacer()
-                Text(ageText(entry.usage.fetchedAt)).font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text(ageText(entry.usage.fetchedAt)).font(.system(size: 11)).foregroundStyle(isStale(entry.usage.fetchedAt) ? Color.orange : Color.secondary.opacity(0.5))
             }
             .padding(.bottom, 10)
             HStack(alignment: .top, spacing: 20) {
                 UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
                 Divider()
-                UsageColumn(label: "Weekly", window: entry.usage.claudeSeven)
+                UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: weeklyColor)
             }
             if sparkPoints.count >= 3 {
                 Spacer().frame(height: 8)
@@ -384,13 +392,13 @@ struct LargeView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(claudeColor)
                 Spacer()
-                Text(ageText(entry.usage.fetchedAt)).font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text(ageText(entry.usage.fetchedAt)).font(.system(size: 11)).foregroundStyle(isStale(entry.usage.fetchedAt) ? Color.orange : Color.secondary.opacity(0.5))
             }
             .padding(.bottom, 12)
             HStack(alignment: .top, spacing: 20) {
                 UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
                 Divider()
-                UsageColumn(label: "Weekly", window: entry.usage.claudeSeven)
+                UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: weeklyColor)
             }
             Spacer().frame(height: 14)
             HStack(spacing: 10) {
