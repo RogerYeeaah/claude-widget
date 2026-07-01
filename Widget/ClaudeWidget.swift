@@ -200,6 +200,7 @@ private func yDomain(_ points: [HistoryPoint]) -> ClosedRange<Double> {
 
 struct SparklineChart: View {
     let points: [HistoryPoint]
+    var lastFiveReset: Date? = nil
 
     private var sampled: [HistoryPoint] {
         guard points.count > 1,
@@ -236,6 +237,11 @@ struct SparklineChart: View {
                         .interpolationMethod(.monotone)
                 }
             }
+            if let reset = lastFiveReset {
+                RuleMark(x: .value("Reset", reset))
+                    .foregroundStyle(claudeColor.opacity(0.35))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            }
         }
         .chartYScale(domain: yDomain(sampled))
         .chartXAxis(.hidden)
@@ -246,6 +252,8 @@ struct SparklineChart: View {
 
 struct FullChart: View {
     let points: [HistoryPoint]
+    var lastFiveReset: Date? = nil
+    var lastSevenReset: Date? = nil
 
     private var domain: ClosedRange<Double> { yDomain(points) }
     private var topLabel: Int { Int(domain.upperBound.rounded()) }
@@ -269,6 +277,26 @@ struct FullChart: View {
                             .lineStyle(StrokeStyle(lineWidth: 2))
                     }
                 }
+            }
+            if let reset = lastFiveReset {
+                RuleMark(x: .value("5h Reset", reset))
+                    .foregroundStyle(claudeColor.opacity(0.45))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .annotation(position: .top, alignment: .center) {
+                        Text(reset, format: .dateTime.hour().minute())
+                            .font(.system(size: 8))
+                            .foregroundStyle(claudeColor.opacity(0.7))
+                    }
+            }
+            if let reset = lastSevenReset {
+                RuleMark(x: .value("7d Reset", reset))
+                    .foregroundStyle(weeklyColor.opacity(0.45))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .annotation(position: .top, alignment: .center) {
+                        Text(reset, format: .dateTime.hour().minute())
+                            .font(.system(size: 8))
+                            .foregroundStyle(weeklyColor.opacity(0.7))
+                    }
             }
         }
         .chartYScale(domain: domain)
@@ -356,6 +384,12 @@ struct MediumView: View {
         return entry.usage.history.filter { $0.date >= cutoff }
     }
 
+    private var lastFiveReset: Date? {
+        guard let resetAt = entry.usage.claudeFive?.resetAt else { return nil }
+        let lastReset = resetAt.addingTimeInterval(-5 * 3600)
+        return lastReset >= Date().addingTimeInterval(-4 * 3600) ? lastReset : nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
@@ -371,7 +405,7 @@ struct MediumView: View {
             }
             if sparkPoints.count >= 3 {
                 Spacer().frame(height: 8)
-                SparklineChart(points: sparkPoints).frame(height: 22)
+                SparklineChart(points: sparkPoints, lastFiveReset: lastFiveReset).frame(height: 22)
             }
         }
         .padding(14)
@@ -385,6 +419,18 @@ struct LargeView: View {
     private var chartPoints: [HistoryPoint] {
         let cutoff = Date().addingTimeInterval(-12 * 3600)
         return entry.usage.history.filter { $0.date >= cutoff }
+    }
+
+    private var lastFiveReset: Date? {
+        guard let resetAt = entry.usage.claudeFive?.resetAt else { return nil }
+        let lastReset = resetAt.addingTimeInterval(-5 * 3600)
+        return lastReset >= Date().addingTimeInterval(-12 * 3600) ? lastReset : nil
+    }
+
+    private var lastSevenReset: Date? {
+        guard let resetAt = entry.usage.claudeSeven?.resetAt else { return nil }
+        let lastReset = resetAt.addingTimeInterval(-7 * 24 * 3600)
+        return lastReset >= Date().addingTimeInterval(-12 * 3600) ? lastReset : nil
     }
 
     var body: some View {
@@ -409,7 +455,7 @@ struct LargeView: View {
             }
             Spacer().frame(height: 6)
             if chartPoints.count >= 3 {
-                FullChart(points: chartPoints).frame(maxHeight: .infinity)
+                FullChart(points: chartPoints, lastFiveReset: lastFiveReset, lastSevenReset: lastSevenReset).frame(maxHeight: .infinity)
             } else {
                 HStack {
                     Spacer()
