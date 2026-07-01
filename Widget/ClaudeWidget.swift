@@ -161,7 +161,7 @@ struct UsageColumn: View {
                         Text("--").foregroundStyle(.secondary)
                     }
                 }
-                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .font(.system(size: 20, weight: .bold, design: .rounded))
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
