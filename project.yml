@@ -1,0 +1,62 @@
+name: ClaudeWidget
+options:
+  deploymentTarget:
+    macOS: "26.0"
+  xcodeVersion: "26.5"
+  defaultConfig: Release
+  generateEmptyDirectories: false
+
+schemes:
+  ClaudeWidget:
+    build:
+      targets:
+        ClaudeWidgetApp: all
+    run:
+      config: Release
+    archive:
+      config: Release
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: "8JRSUP34HG"
+    ENABLE_HARDENED_RUNTIME: YES
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEAD_CODE_STRAINING: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+targets:
+  ClaudeWidgetApp:
+    type: application
+    platform: macOS
+    sources:
+      - App
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.local.ClaudeWidget
+        PRODUCT_NAME: ClaudeWidget
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/App.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - target: ClaudeWidgetExtension
+        embed: true
+
+  ClaudeWidgetExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - Widget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.local.ClaudeWidget.extension
+        PRODUCT_NAME: ClaudeWidgetExtension
+        CODE_SIGN_ENTITLEMENTS: Widget/Widget.entitlements
+        INFOPLIST_FILE: Widget/Info.plist
+        SUPPORTED_PLATFORMS: "macosx iphoneos iphonesimulator"
+        TARGETED_DEVICE_FAMILY: "1,2,6"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
