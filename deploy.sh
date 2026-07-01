@@ -41,3 +41,44 @@ open /Applications/ClaudeWidget.app
 sleep 3
 pluginkit -e use -i com.local.ClaudeWidget.extension
 echo "Done! Right-click desktop → Edit Widgets to add Claude."
+
+# 6. Install cache refresh hook
+echo "Installing usage cache refresh hook..."
+SCRIPT_SRC="$(dirname "$0")/refresh-usage-cache.sh"
+SCRIPT_DST="$HOME/.claude/refresh-usage-cache.sh"
+
+cp "$SCRIPT_SRC" "$SCRIPT_DST"
+chmod +x "$SCRIPT_DST"
+
+# Merge Stop hook into ~/.claude/settings.json without clobbering existing config
+python3 - <<'PYEOF'
+import json, os, sys
+
+settings_path = os.path.expanduser("~/.claude/settings.json")
+hook_cmd = "bash ~/.claude/refresh-usage-cache.sh"
+
+try:
+    with open(settings_path) as f:
+        settings = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    settings = {}
+
+hooks = settings.setdefault("hooks", {})
+stop_hooks = hooks.setdefault("Stop", [])
+
+# Check if hook already registered
+already = any(
+    h.get("command") == hook_cmd
+    for group in stop_hooks
+    for h in group.get("hooks", [])
+)
+if already:
+    print("  Hook already registered, skipping.")
+    sys.exit(0)
+
+stop_hooks.append({"hooks": [{"type": "command", "command": hook_cmd}]})
+
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=2)
+print("  Hook registered in ~/.claude/settings.json")
+PYEOF
