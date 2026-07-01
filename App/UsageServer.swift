@@ -133,6 +133,10 @@ final class UsageServer {
 
     private func normalizeWindow(_ win: [String: Any]?) -> Any {
         guard let win, let used = (win["used_percentage"] as? NSNumber)?.doubleValue else { return NSNull() }
+        if let resetsAt = (win["resets_at"] as? NSNumber)?.doubleValue,
+           Date(timeIntervalSince1970: resetsAt) < Date() {
+            return NSNull()
+        }
         var out: [String: Any] = ["used": used]
         if let resetsAt = (win["resets_at"] as? NSNumber)?.doubleValue { out["resetAt"] = resetsAt * 1000 }
         return out
