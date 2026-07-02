@@ -267,9 +267,22 @@ struct FullChart: View {
     private var domain: ClosedRange<Double> { yDomain(points) }
     private var topLabel: Int { Int(domain.upperBound.rounded()) }
 
+    // 3-point moving average — smooths discrete step data into flowing curves
+    private var smoothed: [HistoryPoint] {
+        guard points.count > 2 else { return points }
+        return points.enumerated().map { (i, p) in
+            let lo = max(0, i - 1), hi = min(points.count - 1, i + 1)
+            let slice = points[lo...hi]
+            let fv = slice.compactMap(\.five);  let sv = slice.compactMap(\.seven)
+            return HistoryPoint(ts: p.ts, date: p.date,
+                                five:  fv.isEmpty ? p.five  : fv.reduce(0,+) / Double(fv.count),
+                                seven: sv.isEmpty ? p.seven : sv.reduce(0,+) / Double(sv.count))
+        }
+    }
+
     var body: some View {
         Chart {
-            ForEach(Array(segments(points).enumerated()), id: \.offset) { _, seg in
+            ForEach(Array(segments(smoothed).enumerated()), id: \.offset) { _, seg in
                 ForEach(seg) { p in
                     if let v = p.five {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
