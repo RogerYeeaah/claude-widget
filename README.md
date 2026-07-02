@@ -16,6 +16,9 @@ A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/
   - Line breaks on gaps (e.g. after app restart)
   - History persists across restarts (`~/.claude/widget-history.json`)
 - **Launch at login** toggle built into the app (no manual launchd setup)
+- **Menu bar icon** — app minimizes to menu bar; icon changes to `↑` when an update is available
+- **One-click updates** — right-click the menu bar icon → "Check for Updates" → "Install Update & Restart"
+- **Pre-reset dimming** — in the Large widget, data before the 5-hour window reset is shown at low opacity so the current window stands out
 
 ## Requirements
 
@@ -59,6 +62,10 @@ Open **ClaudeWidget** from `/Applications`, then toggle **開機自動啟動** i
 3. Add the widget in Small, Medium, or Large size
 
 ## Updating
+
+Right-click the menu bar icon → **Check for Updates** → **Install Update & Restart** (auto git pull + redeploy).
+
+Or manually:
 
 ```bash
 git pull && ./deploy.sh

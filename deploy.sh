@@ -42,8 +42,9 @@ sleep 3
 pluginkit -e use -i com.local.ClaudeWidget.extension
 echo "Done! Right-click desktop → Edit Widgets to add Claude."
 
-# 6. Install cache refresh hook
+# 6. Install cache refresh hook + save repo path
 echo "Installing usage cache refresh hook..."
+echo "$(cd "$(dirname "$0")" && pwd)" > "$HOME/.claude/widget-repo-path"
 SCRIPT_SRC="$(dirname "$0")/refresh-usage-cache.sh"
 SCRIPT_DST="$HOME/.claude/refresh-usage-cache.sh"
 

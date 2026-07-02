@@ -14,10 +14,20 @@ if [ -f "$CACHE" ]; then
     fi
 fi
 
-# Get OAuth token from Keychain
-TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null \
-    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['claudeAiOauth']['accessToken'])" 2>/dev/null)
+# Get OAuth credentials from Keychain
+CREDS=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null)
+[ -z "$CREDS" ] && exit 0
+
+TOKEN=$(echo "$CREDS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['claudeAiOauth']['accessToken'])" 2>/dev/null)
 [ -z "$TOKEN" ] && exit 0
+
+# Check token expiry
+EXPIRES_AT=$(echo "$CREDS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['claudeAiOauth'].get('expiresAt',0))" 2>/dev/null || echo 0)
+NOW_MS=$(python3 -c "import time; print(int(time.time() * 1000))")
+if [ "$EXPIRES_AT" -gt 0 ] 2>/dev/null && [ "$NOW_MS" -gt "$EXPIRES_AT" ] 2>/dev/null; then
+    echo "{\"tokenExpired\":true,\"expiresAt\":$EXPIRES_AT,\"fetchedAt\":$NOW_MS}" > "$HOME/.claude/widget-hook-status.json"
+    exit 0
+fi
 
 # Minimal API call — capture response headers
 TMPFILE=$(mktemp)
