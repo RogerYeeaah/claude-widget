@@ -267,51 +267,28 @@ struct FullChart: View {
     private var domain: ClosedRange<Double> { yDomain(points) }
     private var topLabel: Int { Int(domain.upperBound.rounded()) }
 
-    private var preResetFive: [HistoryPoint] {
-        guard let reset = lastFiveReset else { return [] }
-        return points.filter { $0.date < reset }
-    }
-
-    private var postResetFive: [HistoryPoint] {
-        guard let reset = lastFiveReset else { return points }
-        return points.filter { $0.date >= reset }
+    private func isPreReset(_ p: HistoryPoint) -> Bool {
+        guard let reset = lastFiveReset else { return false }
+        return p.date < reset
     }
 
     var body: some View {
         Chart {
-            // Seven — all data
             ForEach(Array(segments(points).enumerated()), id: \.offset) { _, seg in
                 ForEach(seg) { p in
+                    if let v = p.five {
+                        LineMark(x: .value("t", p.date), y: .value("%", v),
+                                 series: .value("s", isPreReset(p) ? "five_pre" : "five"))
+                            .foregroundStyle(isPreReset(p) ? claudeColor.opacity(0.22) : claudeColor)
+                            .interpolationMethod(.monotone)
+                            .lineStyle(StrokeStyle(lineWidth: isPreReset(p) ? 0.8 : 1.2))
+                    }
                     if let v = p.seven {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
                                  series: .value("s", "seven"))
                             .foregroundStyle(weeklyColor)
                             .interpolationMethod(.monotone)
                             .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 3]))
-                    }
-                }
-            }
-            // Five pre-reset — dimmed
-            ForEach(Array(segments(preResetFive).enumerated()), id: \.offset) { _, seg in
-                ForEach(seg) { p in
-                    if let v = p.five {
-                        LineMark(x: .value("t", p.date), y: .value("%", v),
-                                 series: .value("s", "five_pre"))
-                            .foregroundStyle(claudeColor.opacity(0.22))
-                            .interpolationMethod(.monotone)
-                            .lineStyle(StrokeStyle(lineWidth: 0.8))
-                    }
-                }
-            }
-            // Five post-reset (or all if no reset)
-            ForEach(Array(segments(postResetFive).enumerated()), id: \.offset) { _, seg in
-                ForEach(seg) { p in
-                    if let v = p.five {
-                        LineMark(x: .value("t", p.date), y: .value("%", v),
-                                 series: .value("s", "five"))
-                            .foregroundStyle(claudeColor)
-                            .interpolationMethod(.monotone)
-                            .lineStyle(StrokeStyle(lineWidth: 1.2))
                     }
                 }
             }
