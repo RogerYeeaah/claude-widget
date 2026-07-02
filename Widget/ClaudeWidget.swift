@@ -267,21 +267,16 @@ struct FullChart: View {
     private var domain: ClosedRange<Double> { yDomain(points) }
     private var topLabel: Int { Int(domain.upperBound.rounded()) }
 
-    private func isPreReset(_ p: HistoryPoint) -> Bool {
-        guard let reset = lastFiveReset else { return false }
-        return p.date < reset
-    }
-
     var body: some View {
         Chart {
             ForEach(Array(segments(points).enumerated()), id: \.offset) { _, seg in
                 ForEach(seg) { p in
                     if let v = p.five {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
-                                 series: .value("s", isPreReset(p) ? "five_pre" : "five"))
-                            .foregroundStyle(isPreReset(p) ? claudeColor.opacity(0.22) : claudeColor)
+                                 series: .value("s", "five"))
+                            .foregroundStyle(claudeColor)
                             .interpolationMethod(.monotone)
-                            .lineStyle(StrokeStyle(lineWidth: isPreReset(p) ? 0.8 : 1.2))
+                            .lineStyle(StrokeStyle(lineWidth: 1.2))
                     }
                     if let v = p.seven {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
