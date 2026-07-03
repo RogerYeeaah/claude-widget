@@ -121,9 +121,11 @@ final class UsageServer {
             claude["five"] = normalizeWindow(rateLimits["five_hour"] as? [String: Any])
             claude["seven"] = normalizeWindow(rateLimits["seven_day"] as? [String: Any])
 
+            let fiveResetAt = (claude["five"] as? [String: Any])?["resetAt"] as? Double
             appendHistory(
                 five: (claude["five"] as? [String: Any])?["used"] as? Double,
-                seven: (claude["seven"] as? [String: Any])?["used"] as? Double
+                seven: (claude["seven"] as? [String: Any])?["used"] as? Double,
+                fiveResetAt: fiveResetAt
             )
         }
 
@@ -144,9 +146,26 @@ final class UsageServer {
 
     // MARK: - History
 
-    private func appendHistory(five: Double?, seven: Double?) {
+    private func appendHistory(five: Double?, seven: Double?, fiveResetAt: Double? = nil) {
         let now = Date().timeIntervalSince1970 * 1000
         guard now - lastHistoryTs >= 30_000, five != nil || seven != nil else { return }
+
+        // 若 gap > 30 分鐘，用線性插值補假資料點讓 sparkline 平滑
+        let gapMs = now - lastHistoryTs
+        if gapMs > 1_800_000, let currentFive = five, let resetAt = fiveResetAt {
+            let windowStartMs = resetAt - 18_000_000 // 5h window
+            let backfillFrom = lastHistoryTs > windowStartMs ? lastHistoryTs : windowStartMs
+            let startFive = lastHistoryTs > windowStartMs
+                ? (history.last?["five"] as? Double ?? 0.0)
+                : 0.0
+            var t = backfillFrom + 1_800_000
+            while t < now - 15_000 {
+                let progress = (t - backfillFrom) / (now - backfillFrom)
+                history.append(["ts": t, "five": startFive + (currentFive - startFive) * progress])
+                t += 1_800_000
+            }
+        }
+
         lastHistoryTs = now
         var point: [String: Any] = ["ts": now]
         if let five { point["five"] = five }

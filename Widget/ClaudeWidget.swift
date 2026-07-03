@@ -267,16 +267,22 @@ struct FullChart: View {
     private var domain: ClosedRange<Double> { yDomain(points) }
     private var topLabel: Int { Int(domain.upperBound.rounded()) }
 
-    // 9-point moving average — smooths discrete step data into flowing curves
+    // Gaussian-weighted smoothing — natural decay toward edges, wider window
     private var smoothed: [HistoryPoint] {
         guard points.count > 2 else { return points }
-        var result = points.enumerated().map { (i, p) in
-            let lo = max(0, i - 4), hi = min(points.count - 1, i + 4)
-            let slice = points[lo...hi]
-            let fv = slice.compactMap(\.five);  let sv = slice.compactMap(\.seven)
+        let w = 6
+        var result = points.enumerated().map { (i, p) -> HistoryPoint in
+            let lo = max(0, i - w), hi = min(points.count - 1, i + w)
+            var fSum = 0.0, sSum = 0.0, wSum = 0.0
+            for j in lo...hi {
+                let weight = exp(-Double((j - i) * (j - i)) / Double(w))
+                if let v = points[j].five  { fSum += weight * v }
+                if let v = points[j].seven { sSum += weight * v }
+                wSum += weight
+            }
             return HistoryPoint(ts: p.ts, date: p.date,
-                                five:  fv.isEmpty ? p.five  : fv.reduce(0,+) / Double(fv.count),
-                                seven: sv.isEmpty ? p.seven : sv.reduce(0,+) / Double(sv.count))
+                                five:  p.five  == nil ? nil : fSum / wSum,
+                                seven: p.seven == nil ? nil : sSum / wSum)
         }
         if let last = points.last { result[result.count - 1] = last }
         return result
@@ -290,14 +296,14 @@ struct FullChart: View {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
                                  series: .value("s", "five"))
                             .foregroundStyle(claudeColor)
-                            .interpolationMethod(.monotone)
+                            .interpolationMethod(.catmullRom)
                             .lineStyle(StrokeStyle(lineWidth: 1.2))
                     }
                     if let v = p.seven {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
                                  series: .value("s", "seven"))
                             .foregroundStyle(weeklyColor)
-                            .interpolationMethod(.monotone)
+                            .interpolationMethod(.catmullRom)
                             .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 3]))
                     }
                 }
