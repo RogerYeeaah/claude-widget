@@ -8,7 +8,7 @@ A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/
 - Reset countdown per window (e.g. `resets in 2h 15m`)
 - Color-coded usage: normal → orange at 70% → red at 85%
 - Weekly quota uses blue to match the history chart
-- Adaptive refresh: every 2 minutes when usage ≥ 80%, every 5 minutes otherwise
+- Adaptive refresh: every 3 minutes when usage ≥ 90%, every 5 minutes otherwise
 - Stale data indicator: timestamp turns orange when data is over 30 minutes old
 - Shows "Server offline" (with server icon) when the app isn't reachable
 - **History chart** (Medium: 4h sparkline, Large: 12h dual-line chart)
@@ -73,11 +73,11 @@ git pull && ./deploy.sh
 
 ## How it works
 
-The app runs an embedded HTTP server on `http://127.0.0.1:8787`. The widget fetches `/api/usage` and `/api/history` from it on each refresh. The server reads `~/.claude/usage-cache.json` on every request.
+The app runs an embedded HTTP server on `http://127.0.0.1:8787`. The widget fetches `/api/usage` and `/api/history` from it on each refresh. The server watches `~/.claude/usage-cache.json` with a file-system event source and pre-parses it on change; `/api/usage` responses are served from an in-memory cache (no disk read per request).
 
 **Claude Code 2.1.196+** stopped writing this file automatically. The included `Stop` hook (`refresh-usage-cache.sh`) fills the gap: after each Claude Code response it makes a minimal API call, extracts the rate-limit headers, and writes them to the cache. The hook skips the API call if the cache is less than 10 minutes old.
 
-History is accumulated in memory and saved to `~/.claude/widget-history.json` so it survives app restarts.
+History is accumulated in memory and flushed to `~/.claude/widget-history.json` every 5 minutes and on app quit, so it survives restarts.
 
 ## Notes
 

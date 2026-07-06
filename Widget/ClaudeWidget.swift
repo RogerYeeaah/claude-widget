@@ -128,7 +128,7 @@ struct ClaudeProvider: TimelineProvider {
             let usage = await UsageData.fetch()
             let entry = ClaudeEntry(date: Date(), usage: usage)
             let maxPct = [usage.claudeFive?.percent, usage.claudeSeven?.percent].compactMap { $0 }.max() ?? 0
-            let minutes = maxPct >= 80 ? 2 : 5
+            let minutes = maxPct >= 90 ? 3 : 5
             let next = Calendar.current.date(byAdding: .minute, value: minutes, to: Date())!
             completion(Timeline(entries: [entry], policy: .after(next)))
         }
@@ -290,7 +290,7 @@ struct FullChart: View {
 
     var body: some View {
         Chart {
-            ForEach(Array(segments(smoothed).enumerated()), id: \.offset) { _, seg in
+            ForEach(Array(segments(smoothed, gap: 2100).enumerated()), id: \.offset) { _, seg in
                 ForEach(seg) { p in
                     if let v = p.five {
                         LineMark(x: .value("t", p.date), y: .value("%", v),

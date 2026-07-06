@@ -8,6 +8,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         return false
     }
+    func applicationWillTerminate(_ notification: Notification) {
+        UsageServer.shared.flush()
+    }
 }
 
 // MARK: - Updater
@@ -17,9 +20,16 @@ final class Updater {
     enum State { case idle, checking, upToDate, available(Int) }
     var state: State = .idle
 
+    private var repoPathCache: String?
+    private var repoPathLoaded = false
+
     var repoPath: String? {
-        try? String(contentsOfFile: NSHomeDirectory() + "/.claude/widget-repo-path", encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !repoPathLoaded {
+            repoPathLoaded = true
+            repoPathCache = (try? String(contentsOfFile: NSHomeDirectory() + "/.claude/widget-repo-path", encoding: .utf8))
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        }
+        return repoPathCache
     }
 
     var hasUpdate: Bool {
@@ -35,12 +45,14 @@ final class Updater {
             gitRun(repo, ["fetch", "origin", "--quiet"])
             let head   = gitOut(repo, ["rev-parse", "HEAD"])
             let remote = gitOut(repo, ["rev-parse", "origin/main"])
+            let n: Int? = (head != nil && head != remote)
+                ? (Int(gitOut(repo, ["rev-list", "--count", "HEAD..origin/main"]) ?? "1") ?? 1)
+                : nil
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 guard let h = head, let r = remote else { self.state = .idle; return }
                 if h == r { self.state = .upToDate; return }
-                let n = Int(gitOut(repo, ["rev-list", "--count", "HEAD..origin/main"]) ?? "1") ?? 1
-                self.state = .available(n)
+                self.state = .available(n ?? 1)
             }
         }
     }

@@ -11,6 +11,8 @@ final class UsageServer {
     private let queue = DispatchQueue(label: "usage-server", qos: .utility)
     private var cacheSource: DispatchSourceFileSystemObject?
     private var pendingReload: DispatchWorkItem?
+    private var cachedUsageResponse: Data?
+    private var lastSaveHistoryTs: Double = 0
 
     private let usageCacheURL: URL
     private let historyFileURL: URL
@@ -62,6 +64,7 @@ final class UsageServer {
         )
         src.setEventHandler { [weak self, weak src] in
             guard let self else { return }
+            self.rebuildUsageCache()
             self.scheduleWidgetReload()
             if let events = src?.data, !events.intersection([.rename, .delete]).isEmpty {
                 self.queue.asyncAfter(deadline: .now() + 0.1) { self.watchCacheFile() }
@@ -70,6 +73,7 @@ final class UsageServer {
         src.setCancelHandler { close(fd) }
         src.resume()
         cacheSource = src
+        queue.async { [weak self] in self?.rebuildUsageCache() }
     }
 
     private func scheduleWidgetReload() {
@@ -111,7 +115,7 @@ final class UsageServer {
 
     // MARK: - Usage
 
-    private func makeUsageJSON() -> Data {
+    private func rebuildUsageCache() {
         var claude: [String: Any] = ["fetchedAt": NSNull(), "five": NSNull(), "seven": NSNull()]
 
         if let data = try? Data(contentsOf: usageCacheURL),
@@ -129,8 +133,12 @@ final class UsageServer {
             )
         }
 
-        let result: [String: Any] = ["claude": claude]
-        return (try? JSONSerialization.data(withJSONObject: result)) ?? Data("{}".utf8)
+        cachedUsageResponse = (try? JSONSerialization.data(withJSONObject: ["claude": claude])) ?? Data("{}".utf8)
+    }
+
+    private func makeUsageJSON() -> Data {
+        if cachedUsageResponse == nil { rebuildUsageCache() }
+        return cachedUsageResponse ?? Data("{}".utf8)
     }
 
     private func normalizeWindow(_ win: [String: Any]?) -> Any {
@@ -171,8 +179,11 @@ final class UsageServer {
         if let five { point["five"] = five }
         if let seven { point["seven"] = seven }
         history.append(point)
-        if history.count > 1440 { history.removeFirst() }
-        saveHistory()
+        if history.count > 1440 { history.removeFirst(history.count - 1440) }
+        if now - lastSaveHistoryTs >= 300_000 {
+            lastSaveHistoryTs = now
+            saveHistory()
+        }
     }
 
     private func makeHistoryJSON() -> Data {
@@ -187,6 +198,8 @@ final class UsageServer {
         history = pts.filter { ($0["ts"] as? Double ?? 0) > cutoff }
         lastHistoryTs = history.last?["ts"] as? Double ?? 0
     }
+
+    func flush() { queue.sync { saveHistory() } }
 
     private func saveHistory() {
         guard let data = try? JSONSerialization.data(withJSONObject: history) else { return }
