@@ -1,3 +1,7 @@
+<div align="right">
+  <a href="README.zh-TW.md"><img src="https://img.shields.io/badge/繁體中文-README-blue?style=flat-square" alt="繁體中文"></a>
+</div>
+
 # Claude Usage Widget
 
 A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/code) usage — 5-hour and weekly quota — directly on your desktop.
