@@ -25,6 +25,8 @@ final class UsageServer {
     }
 
     private(set) var isRunning = false
+    private(set) var currentFive: Double?
+    private(set) var currentSeven: Double?
 
     func start() {
         let params = NWParameters.tcp
@@ -126,11 +128,11 @@ final class UsageServer {
             claude["seven"] = normalizeWindow(rateLimits["seven_day"] as? [String: Any])
 
             let fiveResetAt = (claude["five"] as? [String: Any])?["resetAt"] as? Double
-            appendHistory(
-                five: (claude["five"] as? [String: Any])?["used"] as? Double,
-                seven: (claude["seven"] as? [String: Any])?["used"] as? Double,
-                fiveResetAt: fiveResetAt
-            )
+            let five = (claude["five"] as? [String: Any])?["used"] as? Double
+            let seven = (claude["seven"] as? [String: Any])?["used"] as? Double
+            currentFive = five
+            currentSeven = seven
+            appendHistory(five: five, seven: seven, fiveResetAt: fiveResetAt)
         }
 
         cachedUsageResponse = (try? JSONSerialization.data(withJSONObject: ["claude": claude])) ?? Data("{}".utf8)

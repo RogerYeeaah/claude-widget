@@ -161,19 +161,44 @@ struct MenuContent: View {
 struct ContentView: View {
     let updater: Updater
     @State private var isLoginItem = SMAppService.mainApp.status == .enabled
+    @State private var serverRunning = UsageServer.shared.isRunning
+    @State private var currentFive: Double? = UsageServer.shared.currentFive
+    @State private var currentSeven: Double? = UsageServer.shared.currentSeven
+
+    private let claudeColor = Color(red: 0.745, green: 0.455, blue: 0.341)
+    private let weeklyColor = Color(red: 0.463, green: 0.498, blue: 0.776)
+
+    private func barColor(_ pct: Double) -> Color {
+        pct >= 85 ? .red : pct >= 70 ? .orange : .secondary
+    }
 
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "chart.bar.fill")
                 .font(.system(size: 40))
-                .foregroundStyle(Color(red: 0.745, green: 0.455, blue: 0.341))
+                .foregroundStyle(claudeColor)
             Text("Claude Usage Widget")
                 .font(.headline)
             HStack(spacing: 6) {
-                Circle().fill(UsageServer.shared.isRunning ? .green : .orange).frame(width: 8, height: 8)
-                Text(UsageServer.shared.isRunning ? "Server running on :8787" : "Port :8787 已由另一實例使用")
+                Circle().fill(serverRunning ? Color.green : Color.orange).frame(width: 8, height: 8)
+                Text(serverRunning ? "Server running on :8787" : "Port :8787 已由另一實例使用")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            if currentFive != nil || currentSeven != nil {
+                HStack(spacing: 16) {
+                    if let f = currentFive {
+                        Label("\(Int(f.rounded()))%", systemImage: "clock")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(barColor(f))
+                    }
+                    if let s = currentSeven {
+                        Label("\(Int(s.rounded()))%", systemImage: "calendar")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(barColor(s))
+                    }
+                }
+                .padding(.vertical, 2)
             }
             if case .available(let n) = updater.state {
                 HStack(spacing: 6) {
@@ -200,9 +225,14 @@ struct ContentView: View {
                 }
         }
         .padding(32)
-        .frame(width: 320, height: 240)
+        .frame(width: 320)
         .onDisappear {
             NSApp.setActivationPolicy(.accessory)
+        }
+        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
+            serverRunning = UsageServer.shared.isRunning
+            currentFive = UsageServer.shared.currentFive
+            currentSeven = UsageServer.shared.currentSeven
         }
     }
 }

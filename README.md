@@ -12,13 +12,15 @@ A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/
 - Reset countdown per window (e.g. `resets in 2h 15m`)
 - Color-coded usage: normal → orange at 70% → red at 85%
 - Weekly quota uses blue to match the history chart
-- Adaptive refresh: every 3 minutes when usage ≥ 90%, every 5 minutes otherwise
+- Adaptive refresh: every 2 minutes at ≥ 90%, 5 minutes at ≥ 70%, 10 minutes otherwise
 - Stale data indicator: timestamp turns orange when data is over 30 minutes old
 - Shows "Server offline" (with server icon) when the app isn't reachable
 - **History chart** (Medium: 4h sparkline, Large: 12h dual-line chart)
   - Dynamic Y-axis scaled to actual data range for clear visibility
   - Line breaks on gaps (e.g. after app restart)
   - History persists across restarts (`~/.claude/widget-history.json`)
+- **App window shows live usage** — the companion window displays current 5h/weekly % with color coding, updated every 2 seconds
+- **Widget gallery preview uses real data** — shows your actual usage instead of placeholder values
 - **Launch at login** toggle built into the app (no manual launchd setup)
 - **Menu bar icon** — app minimizes to menu bar; icon changes to `↑` when an update is available
 - **One-click updates** — right-click the menu bar icon → "Check for Updates" → "Install Update & Restart"

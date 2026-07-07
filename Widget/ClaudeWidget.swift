@@ -121,14 +121,21 @@ struct ClaudeProvider: TimelineProvider {
         ClaudeEntry(date: Date(), usage: .placeholder)
     }
     func getSnapshot(in context: Context, completion: @escaping (ClaudeEntry) -> Void) {
-        completion(ClaudeEntry(date: Date(), usage: .placeholder))
+        if context.isPreview {
+            completion(ClaudeEntry(date: Date(), usage: .placeholder))
+            return
+        }
+        Task {
+            let usage = await UsageData.fetch()
+            completion(ClaudeEntry(date: Date(), usage: usage.isOffline ? .placeholder : usage))
+        }
     }
     func getTimeline(in context: Context, completion: @escaping (Timeline<ClaudeEntry>) -> Void) {
         Task {
             let usage = await UsageData.fetch()
             let entry = ClaudeEntry(date: Date(), usage: usage)
             let maxPct = [usage.claudeFive?.percent, usage.claudeSeven?.percent].compactMap { $0 }.max() ?? 0
-            let minutes = maxPct >= 90 ? 3 : 5
+            let minutes = maxPct >= 90 ? 2 : maxPct >= 70 ? 5 : 10
             let next = Calendar.current.date(byAdding: .minute, value: minutes, to: Date())!
             completion(Timeline(entries: [entry], policy: .after(next)))
         }
@@ -273,16 +280,15 @@ struct FullChart: View {
         let w = 6
         var result = points.enumerated().map { (i, p) -> HistoryPoint in
             let lo = max(0, i - w), hi = min(points.count - 1, i + w)
-            var fSum = 0.0, sSum = 0.0, wSum = 0.0
+            var fSum = 0.0, sSum = 0.0, wSumF = 0.0, wSumS = 0.0
             for j in lo...hi {
                 let weight = exp(-Double((j - i) * (j - i)) / Double(w))
-                if let v = points[j].five  { fSum += weight * v }
-                if let v = points[j].seven { sSum += weight * v }
-                wSum += weight
+                if let v = points[j].five  { fSum += weight * v; wSumF += weight }
+                if let v = points[j].seven { sSum += weight * v; wSumS += weight }
             }
             return HistoryPoint(ts: p.ts, date: p.date,
-                                five:  p.five  == nil ? nil : fSum / wSum,
-                                seven: p.seven == nil ? nil : sSum / wSum)
+                                five:  p.five  == nil ? nil : (wSumF > 0 ? fSum / wSumF : p.five),
+                                seven: p.seven == nil ? nil : (wSumS > 0 ? sSum / wSumS : p.seven))
         }
         if let last = points.last { result[result.count - 1] = last }
         return result
@@ -376,6 +382,21 @@ struct OfflineView: View {
     }
 }
 
+private struct WidgetHeader: View {
+    let fetchedAt: Date?
+    var bottomPadding: CGFloat = 10
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(claudeColor)
+            Spacer()
+            Text(ageText(fetchedAt))
+                .font(.system(size: 11))
+                .foregroundStyle(isStale(fetchedAt) ? Color.orange : Color.secondary.opacity(0.5))
+        }
+        .padding(.bottom, bottomPadding)
+    }
+}
+
 // MARK: - Widget Views
 
 private func isStale(_ fetchedAt: Date?) -> Bool {
@@ -395,12 +416,7 @@ struct SmallView: View {
     let entry: ClaudeEntry
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(claudeColor)
-                Spacer()
-                Text(ageText(entry.usage.fetchedAt)).font(.system(size: 11)).foregroundStyle(isStale(entry.usage.fetchedAt) ? Color.orange : Color.secondary.opacity(0.5))
-            }
-            .padding(.bottom, 10)
+            WidgetHeader(fetchedAt: entry.usage.fetchedAt)
             UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
             Spacer().frame(height: 10)
             UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: weeklyColor)
@@ -428,12 +444,7 @@ struct MediumView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(claudeColor)
-                Spacer()
-                Text(ageText(entry.usage.fetchedAt)).font(.system(size: 11)).foregroundStyle(isStale(entry.usage.fetchedAt) ? Color.orange : Color.secondary.opacity(0.5))
-            }
-            .padding(.bottom, 10)
+            WidgetHeader(fetchedAt: entry.usage.fetchedAt)
             HStack(alignment: .top, spacing: 20) {
                 UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
                 Divider()
@@ -473,12 +484,7 @@ struct LargeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(claudeColor)
-                Spacer()
-                Text(ageText(entry.usage.fetchedAt)).font(.system(size: 11)).foregroundStyle(isStale(entry.usage.fetchedAt) ? Color.orange : Color.secondary.opacity(0.5))
-            }
-            .padding(.bottom, 12)
+            WidgetHeader(fetchedAt: entry.usage.fetchedAt, bottomPadding: 12)
             HStack(alignment: .top, spacing: 20) {
                 UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
                 Divider()
