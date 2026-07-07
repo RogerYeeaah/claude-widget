@@ -15,17 +15,6 @@ struct HistoryPoint: Identifiable {
 struct UsageWindow {
     let percent: Double
     let resetAt: Date?
-
-    var resetText: String? {
-        guard let resetAt else { return nil }
-        let remaining = resetAt.timeIntervalSinceNow
-        guard remaining > 0 else { return nil }
-        let hours = Int(remaining / 3600)
-        let minutes = Int(remaining.truncatingRemainder(dividingBy: 3600) / 60)
-        if hours >= 24 { return "resets in \(hours / 24)d \(hours % 24)h" }
-        if hours > 0  { return "resets in \(hours)h \(minutes)m" }
-        return "resets in \(minutes)m"
-    }
 }
 
 struct UsageData {
@@ -33,10 +22,13 @@ struct UsageData {
     let claudeSeven: UsageWindow?
     let fetchedAt: Date?
     let history: [HistoryPoint]
+    let serverReachable: Bool  // #22: distinguish "offline" from "waiting for data"
 
-    var isOffline: Bool { fetchedAt == nil }
+    var isOffline: Bool  { !serverReachable }
+    var hasData:   Bool  { serverReachable && fetchedAt != nil }
 
-    static let empty = UsageData(claudeFive: nil, claudeSeven: nil, fetchedAt: nil, history: [])
+    static let empty = UsageData(claudeFive: nil, claudeSeven: nil,
+                                 fetchedAt: nil, history: [], serverReachable: false)
     static let placeholder = UsageData(
         claudeFive: UsageWindow(percent: 42, resetAt: Date().addingTimeInterval(9000)),
         claudeSeven: UsageWindow(percent: 18, resetAt: Date().addingTimeInterval(3600 * 72)),
@@ -46,24 +38,27 @@ struct UsageData {
                          date: Date().addingTimeInterval(offset * 60),
                          five: max(0, 42 + Double.random(in: -8...8)),
                          seven: max(0, 18 + Double.random(in: -4...4)))
-        }
+        },
+        serverReachable: true
     )
 
     static func fetch() async -> UsageData {
-        guard let usageURL = URL(string: "http://127.0.0.1:8787/api/usage"),
+        guard let usageURL   = URL(string: "http://127.0.0.1:8787/api/usage"),
               let historyURL = URL(string: "http://127.0.0.1:8787/api/history")
         else { return .empty }
 
-        async let usageData = fetchRaw(usageURL)
+        async let usageData   = fetchRaw(usageURL)
         async let historyData = fetchRaw(historyURL)
         let (usage, hist) = await (usageData, historyData)
 
+        let serverReachable = usage != nil  // HTTP success → server is up
         let parsed = parseUsage(usage)
         return UsageData(
-            claudeFive: parsed.0,
-            claudeSeven: parsed.1,
-            fetchedAt: parsed.2,
-            history: parseHistory(hist)
+            claudeFive:      parsed.0,
+            claudeSeven:     parsed.1,
+            fetchedAt:       parsed.2,
+            history:         parseHistory(hist),
+            serverReachable: serverReachable
         )
     }
 
@@ -102,7 +97,7 @@ struct UsageData {
             return HistoryPoint(
                 ts: ts,
                 date: Date(timeIntervalSince1970: ts / 1000),
-                five: (p["five"] as? NSNumber)?.doubleValue,
+                five:  (p["five"]  as? NSNumber)?.doubleValue,
                 seven: (p["seven"] as? NSNumber)?.doubleValue
             )
         }
@@ -134,8 +129,10 @@ struct ClaudeProvider: TimelineProvider {
         Task {
             let usage = await UsageData.fetch()
             let entry = ClaudeEntry(date: Date(), usage: usage)
-            let maxPct = [usage.claudeFive?.percent, usage.claudeSeven?.percent].compactMap { $0 }.max() ?? 0
-            let minutes = maxPct >= 90 ? 2 : maxPct >= 70 ? 5 : 10
+            let maxPct = [usage.claudeFive?.percent, usage.claudeSeven?.percent]
+                .compactMap { $0 }.max() ?? 0
+            // #19: Offline → 2 min so we pick up as soon as server recovers
+            let minutes = usage.isOffline ? 2 : maxPct >= 90 ? 2 : maxPct >= 70 ? 5 : 10
             let next = Calendar.current.date(byAdding: .minute, value: minutes, to: Date())!
             completion(Timeline(entries: [entry], policy: .after(next)))
         }
@@ -144,20 +141,36 @@ struct ClaudeProvider: TimelineProvider {
 
 // MARK: - Shared Components
 
-private let claudeColor  = Color(red: 0.745, green: 0.455, blue: 0.341)
-private let weeklyColor  = Color(red: 0.463, green: 0.498, blue: 0.776)
+private func segments(_ points: [HistoryPoint], gap: TimeInterval = 300) -> [[HistoryPoint]] {
+    guard !points.isEmpty else { return [] }
+    var result: [[HistoryPoint]] = [[points[0]]]
+    for i in 1..<points.count {
+        if points[i].date.timeIntervalSince(points[i - 1].date) > gap { result.append([]) }
+        result[result.count - 1].append(points[i])
+    }
+    return result
+}
+
+private func yDomain(_ points: [HistoryPoint]) -> ClosedRange<Double> {
+    let values = points.flatMap { [$0.five, $0.seven].compactMap { $0 } }
+    let dataMax = values.max() ?? 0
+    // #20: 1.25× headroom instead of 2× — reduces empty whitespace
+    let top = min(ceil(max(dataMax * 1.25, 10) / 5) * 5, 100)
+    return 0...top
+}
+
+private func isStale(_ fetchedAt: Date?) -> Bool {
+    guard let t = fetchedAt else { return false }
+    return -t.timeIntervalSinceNow > 1800
+}
 
 struct UsageColumn: View {
     let label: String
     let window: UsageWindow?
-    var tintColor: Color = claudeColor
+    var tintColor: Color = Theme.claude
 
     private var pct: Double { window?.percent ?? 0 }
-    private var valueColor: Color {
-        if pct >= 85 { return .red }
-        if pct >= 70 { return .orange }
-        return tintColor
-    }
+    private var valueColor: Color { Theme.usageColor(pct, fallback: tintColor) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -181,43 +194,26 @@ struct UsageColumn: View {
                 }
             }
             .frame(height: 5)
-            Text(window?.resetText ?? " ").font(.system(size: 10)).foregroundStyle(.tertiary)
+            // #18: Live reset countdown using .relative style — updates without new timeline entry
+            Group {
+                if let date = window?.resetAt, date > .now {
+                    HStack(spacing: 2) {
+                        Text("resets").font(.system(size: 10)).foregroundStyle(.tertiary)
+                        Text(date, style: .relative).font(.system(size: 10)).foregroundStyle(.tertiary)
+                    }
+                } else {
+                    Text(" ").font(.system(size: 10))
+                }
+            }
         }
     }
-}
-
-private func segments(_ points: [HistoryPoint], gap: TimeInterval = 300) -> [[HistoryPoint]] {
-    guard !points.isEmpty else { return [] }
-    var result: [[HistoryPoint]] = [[points[0]]]
-    for i in 1..<points.count {
-        if points[i].date.timeIntervalSince(points[i - 1].date) > gap {
-            result.append([])
-        }
-        result[result.count - 1].append(points[i])
-    }
-    return result
-}
-
-private func yDomain(_ points: [HistoryPoint]) -> ClosedRange<Double> {
-    let values = points.flatMap { [$0.five, $0.seven].compactMap { $0 } }
-    let dataMax = values.max() ?? 0
-    let top = min(ceil(max(dataMax * 2, 10) / 5) * 5, 100)
-    return 0...top
 }
 
 struct SparklineChart: View {
     let points: [HistoryPoint]
     var lastFiveReset: Date? = nil
 
-    private var sparkDomain: ClosedRange<Double> {
-        var pts = sampled
-        if let reset = lastFiveReset {
-            let postReset = sampled.filter { $0.date >= reset }
-            if !postReset.isEmpty { pts = postReset }
-        }
-        return yDomain(pts)
-    }
-
+    // #11: O(n) single-pass bucket assignment — was O(n × 40)
     private var sampled: [HistoryPoint] {
         guard points.count > 1,
               let first = points.first, let last = points.last else { return points }
@@ -225,41 +221,55 @@ struct SparklineChart: View {
         guard duration > 0 else { return points }
         let n = min(points.count, 40)
         let bucketSize = duration / Double(n)
+        var fiveBuckets  = [[Double]](repeating: [], count: n)
+        var sevenBuckets = [[Double]](repeating: [], count: n)
+        for p in points {
+            let b = min(Int((p.ts - first.ts) / bucketSize), n - 1)
+            if let v = p.five  { fiveBuckets[b].append(v) }
+            if let v = p.seven { sevenBuckets[b].append(v) }
+        }
         return (0..<n).compactMap { b in
-            let lo = first.ts + Double(b) * bucketSize
-            let hi = lo + bucketSize
-            let bucket = points.filter { $0.ts >= lo && $0.ts < hi }
-            guard !bucket.isEmpty else { return nil }
-            let midTs = (lo + hi) / 2
-            let fives = bucket.compactMap { $0.five }
-            let sevens = bucket.compactMap { $0.seven }
+            let fives  = fiveBuckets[b]
+            let sevens = sevenBuckets[b]
+            guard !fives.isEmpty || !sevens.isEmpty else { return nil }
+            let midTs = first.ts + (Double(b) + 0.5) * bucketSize
             return HistoryPoint(
-                ts: midTs,
-                date: Date(timeIntervalSince1970: midTs / 1000),
-                five: fives.isEmpty ? nil : fives.reduce(0, +) / Double(fives.count),
+                ts:    midTs,
+                date:  Date(timeIntervalSince1970: midTs / 1000),
+                five:  fives.isEmpty  ? nil : fives.reduce(0,  +) / Double(fives.count),
                 seven: sevens.isEmpty ? nil : sevens.reduce(0, +) / Double(sevens.count)
             )
         }
     }
 
+    private func sparkDomain(for pts: [HistoryPoint]) -> ClosedRange<Double> {
+        var filtered = pts
+        if let reset = lastFiveReset {
+            let postReset = pts.filter { $0.date >= reset }
+            if !postReset.isEmpty { filtered = postReset }
+        }
+        return yDomain(filtered)
+    }
+
     var body: some View {
+        let pts = sampled  // #11: compute once — was computed 3× before
         Chart {
-            ForEach(sampled) { p in
+            ForEach(pts) { p in
                 if let v = p.five {
                     LineMark(x: .value("t", p.date), y: .value("%", v),
                              series: .value("s", "five"))
-                        .foregroundStyle(claudeColor.opacity(0.8))
+                        .foregroundStyle(Theme.claude.opacity(0.8))
                         .lineStyle(StrokeStyle(lineWidth: 1.0))
                         .interpolationMethod(.monotone)
                 }
             }
             if let reset = lastFiveReset {
                 RuleMark(x: .value("Reset", reset))
-                    .foregroundStyle(claudeColor.opacity(0.18))
+                    .foregroundStyle(Theme.claude.opacity(0.18))
                     .lineStyle(StrokeStyle(lineWidth: 1))
             }
         }
-        .chartYScale(domain: sparkDomain)
+        .chartYScale(domain: sparkDomain(for: pts))
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartLegend(.hidden)
@@ -274,7 +284,6 @@ struct FullChart: View {
     private var domain: ClosedRange<Double> { yDomain(points) }
     private var topLabel: Int { Int(domain.upperBound.rounded()) }
 
-    // Gaussian-weighted smoothing — natural decay toward edges, wider window
     private var smoothed: [HistoryPoint] {
         guard points.count > 2 else { return points }
         let w = 6
@@ -296,19 +305,20 @@ struct FullChart: View {
 
     var body: some View {
         Chart {
-            ForEach(Array(segments(smoothed, gap: 2100).enumerated()), id: \.offset) { _, seg in
+            // #2: Unique series name per segment — prevents Chart merging separate segments
+            ForEach(Array(segments(smoothed, gap: 2100).enumerated()), id: \.offset) { idx, seg in
                 ForEach(seg) { p in
                     if let v = p.five {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
-                                 series: .value("s", "five"))
-                            .foregroundStyle(claudeColor)
+                                 series: .value("s", "five-\(idx)"))
+                            .foregroundStyle(Theme.claude)
                             .interpolationMethod(.catmullRom)
                             .lineStyle(StrokeStyle(lineWidth: 1.2))
                     }
                     if let v = p.seven {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
-                                 series: .value("s", "seven"))
-                            .foregroundStyle(weeklyColor)
+                                 series: .value("s", "seven-\(idx)"))
+                            .foregroundStyle(Theme.weekly)
                             .interpolationMethod(.catmullRom)
                             .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 3]))
                     }
@@ -316,26 +326,27 @@ struct FullChart: View {
             }
             if let reset = lastFiveReset {
                 RuleMark(x: .value("5h Reset", reset))
-                    .foregroundStyle(claudeColor.opacity(0.22))
+                    .foregroundStyle(Theme.claude.opacity(0.22))
                     .lineStyle(StrokeStyle(lineWidth: 1))
                 PointMark(x: .value("t", reset), y: .value("%", domain.upperBound))
                     .opacity(0)
                     .annotation(position: .bottom, alignment: .center) {
                         Text(reset, format: .dateTime.hour(.defaultDigits(amPM: .omitted)).minute())
                             .font(.system(size: 8))
-                            .foregroundStyle(claudeColor.opacity(0.7))
+                            .foregroundStyle(Theme.claude.opacity(0.7))
                     }
             }
             if let reset = lastSevenReset {
+                // #10a: 7d reset uses weeklyColor, not claudeColor
                 RuleMark(x: .value("7d Reset", reset))
-                    .foregroundStyle(claudeColor.opacity(0.22))
+                    .foregroundStyle(Theme.weekly.opacity(0.22))
                     .lineStyle(StrokeStyle(lineWidth: 1))
                 PointMark(x: .value("t", reset), y: .value("%", domain.upperBound))
                     .opacity(0)
                     .annotation(position: .bottom, alignment: .center) {
                         Text(reset, format: .dateTime.hour(.defaultDigits(amPM: .omitted)).minute())
                             .font(.system(size: 8))
-                            .foregroundStyle(weeklyColor.opacity(0.7))
+                            .foregroundStyle(Theme.weekly.opacity(0.7))
                     }
             }
         }
@@ -362,10 +373,11 @@ struct FullChart: View {
     }
 }
 
+// #22: "Server offline" — HTTP connection failed
 struct OfflineView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(claudeColor)
+            Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.claude)
             Spacer()
             HStack {
                 Spacer()
@@ -382,35 +394,46 @@ struct OfflineView: View {
     }
 }
 
+// #22: "Waiting for data" — server is reachable but hasn't received usage data yet
+struct WaitingView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.claude)
+            Spacer()
+            HStack {
+                Spacer()
+                VStack(spacing: 6) {
+                    Image(systemName: "clock").font(.system(size: 22)).foregroundStyle(.secondary)
+                    Text("Waiting for data").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(14)
+        .containerBackground(for: .widget) { Color.clear }
+    }
+}
+
 private struct WidgetHeader: View {
     let fetchedAt: Date?
     var bottomPadding: CGFloat = 10
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(claudeColor)
+            Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.claude)
             Spacer()
-            Text(ageText(fetchedAt))
-                .font(.system(size: 11))
-                .foregroundStyle(isStale(fetchedAt) ? Color.orange : Color.secondary.opacity(0.5))
+            // #18: Text(.relative) updates live in the widget without new timeline entries
+            if let t = fetchedAt {
+                Text(t, style: .relative)
+                    .font(.system(size: 11))
+                    .foregroundStyle(isStale(t) ? Color.orange : Color.secondary.opacity(0.5))
+            }
         }
         .padding(.bottom, bottomPadding)
     }
 }
 
 // MARK: - Widget Views
-
-private func isStale(_ fetchedAt: Date?) -> Bool {
-    guard let t = fetchedAt else { return false }
-    return -t.timeIntervalSinceNow > 1800
-}
-
-private func ageText(_ fetchedAt: Date?) -> String {
-    guard let t = fetchedAt else { return "" }
-    let s = Int(-t.timeIntervalSinceNow)
-    if s < 60 { return "Just now" }
-    if s < 3600 { return "\(s / 60)m ago" }
-    return "\(s / 3600)h ago"
-}
 
 struct SmallView: View {
     let entry: ClaudeEntry
@@ -419,7 +442,7 @@ struct SmallView: View {
             WidgetHeader(fetchedAt: entry.usage.fetchedAt)
             UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
             Spacer().frame(height: 10)
-            UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: weeklyColor)
+            UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: Theme.weekly)
         }
         .padding(14)
         .containerBackground(for: .widget) { Color.clear }
@@ -448,7 +471,7 @@ struct MediumView: View {
             HStack(alignment: .top, spacing: 20) {
                 UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
                 Divider()
-                UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: weeklyColor)
+                UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: Theme.weekly)
             }
             if sparkPoints.count >= 3 {
                 Spacer().frame(height: 8)
@@ -488,18 +511,19 @@ struct LargeView: View {
             HStack(alignment: .top, spacing: 20) {
                 UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
                 Divider()
-                UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: weeklyColor)
+                UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: Theme.weekly)
             }
             Spacer().frame(height: 14)
             HStack(spacing: 10) {
-                Circle().fill(claudeColor).frame(width: 7, height: 7)
+                Circle().fill(Theme.claude).frame(width: 7, height: 7)
                 Text("5 Hours").font(.system(size: 10)).foregroundStyle(.secondary)
-                Circle().fill(weeklyColor).frame(width: 7, height: 7)
+                Circle().fill(Theme.weekly).frame(width: 7, height: 7)
                 Text("Weekly").font(.system(size: 10)).foregroundStyle(.secondary)
             }
             Spacer().frame(height: 6)
             if chartPoints.count >= 3 {
-                FullChart(points: chartPoints, lastFiveReset: lastFiveReset, lastSevenReset: lastSevenReset).frame(maxHeight: .infinity)
+                FullChart(points: chartPoints, lastFiveReset: lastFiveReset, lastSevenReset: lastSevenReset)
+                    .frame(maxHeight: .infinity)
             } else {
                 HStack {
                     Spacer()
@@ -520,6 +544,9 @@ struct ClaudeWidgetView: View {
     var body: some View {
         if entry.usage.isOffline {
             OfflineView()
+        } else if !entry.usage.hasData {
+            // #22: Server reachable but no usage data yet (Claude Code hasn't written cache)
+            WaitingView()
         } else {
             switch family {
                 case .systemMedium: MediumView(entry: entry)

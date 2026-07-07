@@ -35,6 +35,7 @@ targets:
     platform: macOS
     sources:
       - App
+      - Shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.local.ClaudeWidget
@@ -51,6 +52,7 @@ targets:
     platform: macOS
     sources:
       - Widget
+      - Shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.local.ClaudeWidget.extension

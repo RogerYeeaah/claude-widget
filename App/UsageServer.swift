@@ -5,6 +5,19 @@ import WidgetKit
 final class UsageServer {
     static let shared = UsageServer()
 
+    // MARK: - Constants (#16)
+    private enum C {
+        static let port: UInt16 = 8787
+        static let minSampleIntervalMs: Double = 30_000     // 30 s
+        static let backfillStepMs: Double     = 1_800_000   // 30 min
+        static let fiveHourWindowMs: Double   = 18_000_000  // 5 h
+        static let gapThresholdMs: Double     = 1_800_000   // 30 min gap → backfill
+        static let saveIntervalMs: Double     = 300_000     // 5 min
+        static let maxHistoryPoints           = 1440        // 24 h at 1-min granularity
+        static let backfillLeadMs: Double     = 15_000      // stop backfill 15 s before now
+    }
+
+    // All mutable state lives on `queue`
     private var listener: NWListener?
     private var history: [[String: Any]] = []
     private var lastHistoryTs: Double = 0
@@ -13,6 +26,9 @@ final class UsageServer {
     private var pendingReload: DispatchWorkItem?
     private var cachedUsageResponse: Data?
     private var lastSaveHistoryTs: Double = 0
+    private var _isRunning = false
+    private var _currentFive: Double?
+    private var _currentSeven: Double?
 
     private let usageCacheURL: URL
     private let historyFileURL: URL
@@ -24,25 +40,35 @@ final class UsageServer {
         loadHistory()
     }
 
-    private(set) var isRunning = false
-    private(set) var currentFive: Double?
-    private(set) var currentSeven: Double?
+    // #6: Thread-safe read — safe to call from any thread (including MainActor).
+    var snapshot: (running: Bool, five: Double?, seven: Double?) {
+        queue.sync { (_isRunning, _currentFive, _currentSeven) }
+    }
+
+    // MARK: - Start
 
     func start() {
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
-        guard let port = NWEndpoint.Port(rawValue: 8787),
-              let listener = try? NWListener(using: params, on: port) else { return }
+        // #1: Bind to loopback — widget traffic never leaves this machine
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(
+            host: .ipv4(.loopback),
+            port: NWEndpoint.Port(rawValue: C.port)!)
+        guard let listener = try? NWListener(using: params) else { return }
         self.listener = listener
 
         listener.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
             switch state {
             case .ready:
-                self?.isRunning = true
+                self._isRunning = true
+                self.scheduleWidgetReload()  // #4: Push fresh timeline when server comes up
             case .failed:
-                // port 已被另一個實例佔用，靜默跳過
-                self?.isRunning = false
-                self?.listener?.cancel()
+                self._isRunning = false
+                self.listener?.cancel()
+                self.listener = nil
+                // #5b: Retry listener after 5 s (port may have freed up)
+                self.queue.asyncAfter(deadline: .now() + 5) { [weak self] in self?.start() }
             default:
                 break
             }
@@ -57,13 +83,13 @@ final class UsageServer {
     private func watchCacheFile() {
         cacheSource?.cancel()
         let fd = open(usageCacheURL.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-
+        guard fd >= 0 else {
+            // #5a: Cache file doesn't exist yet — retry until Claude writes it
+            queue.asyncAfter(deadline: .now() + 5) { [weak self] in self?.watchCacheFile() }
+            return
+        }
         let src = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd,
-            eventMask: [.write, .rename, .delete],
-            queue: queue
-        )
+            fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: queue)
         src.setEventHandler { [weak self, weak src] in
             guard let self else { return }
             self.rebuildUsageCache()
@@ -80,12 +106,12 @@ final class UsageServer {
 
     private func scheduleWidgetReload() {
         pendingReload?.cancel()
-        let work = DispatchWorkItem {
-            WidgetCenter.shared.reloadAllTimelines()
-        }
+        let work = DispatchWorkItem { WidgetCenter.shared.reloadAllTimelines() }
         pendingReload = work
         queue.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
+
+    // MARK: - HTTP
 
     private func handle(_ connection: NWConnection) {
         connection.start(queue: queue)
@@ -115,82 +141,106 @@ final class UsageServer {
         return Data(header.utf8) + body
     }
 
-    // MARK: - Usage
+    // MARK: - Usage (#12 Codable for usage-cache.json)
 
-    private func rebuildUsageCache() {
-        var claude: [String: Any] = ["fetchedAt": NSNull(), "five": NSNull(), "seven": NSNull()]
+    private struct UsageCacheFile: Decodable {
+        let fetchedAt: Double?
+        let rateLimits: RateLimits?
 
-        if let data = try? Data(contentsOf: usageCacheURL),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let rateLimits = json["rate_limits"] as? [String: Any] {
-            claude["fetchedAt"] = json["fetchedAt"] ?? NSNull()
-            claude["five"] = normalizeWindow(rateLimits["five_hour"] as? [String: Any])
-            claude["seven"] = normalizeWindow(rateLimits["seven_day"] as? [String: Any])
-
-            let fiveResetAt = (claude["five"] as? [String: Any])?["resetAt"] as? Double
-            let five = (claude["five"] as? [String: Any])?["used"] as? Double
-            let seven = (claude["seven"] as? [String: Any])?["used"] as? Double
-            currentFive = five
-            currentSeven = seven
-            appendHistory(five: five, seven: seven, fiveResetAt: fiveResetAt)
+        struct RateLimits: Decodable {
+            let fiveHour: RateLimit?
+            let sevenDay: RateLimit?
+            enum CodingKeys: String, CodingKey {
+                case fiveHour = "five_hour"
+                case sevenDay = "seven_day"
+            }
         }
 
-        cachedUsageResponse = (try? JSONSerialization.data(withJSONObject: ["claude": claude])) ?? Data("{}".utf8)
+        struct RateLimit: Decodable {
+            let usedPercentage: Double?
+            let resetsAt: Double?
+            enum CodingKeys: String, CodingKey {
+                case usedPercentage = "used_percentage"
+                case resetsAt = "resets_at"
+            }
+        }
+    }
+
+    private func rebuildUsageCache() {
+        guard let data = try? Data(contentsOf: usageCacheURL),
+              let cache = try? JSONDecoder().decode(UsageCacheFile.self, from: data),
+              let rateLimits = cache.rateLimits
+        else {
+            // #3: Partial-write guard — keep last valid response rather than replacing with empty
+            if cachedUsageResponse == nil {
+                cachedUsageResponse = Data(#"{"claude":{"fetchedAt":null,"five":null,"seven":null}}"#.utf8)
+            }
+            return
+        }
+
+        func normalize(_ rl: UsageCacheFile.RateLimit?) -> [String: Any]? {
+            guard let rl, let used = rl.usedPercentage else { return nil }
+            if let resetsAt = rl.resetsAt, Date(timeIntervalSince1970: resetsAt) < Date() { return nil }
+            var out: [String: Any] = ["used": used]
+            if let resetsAt = rl.resetsAt { out["resetAt"] = resetsAt * 1000 }
+            return out
+        }
+
+        let five  = normalize(rateLimits.fiveHour)
+        let seven = normalize(rateLimits.sevenDay)
+        _currentFive  = five?["used"]  as? Double
+        _currentSeven = seven?["used"] as? Double
+
+        let claude: [String: Any] = [
+            "fetchedAt": cache.fetchedAt ?? NSNull(),
+            "five":  five  ?? NSNull(),
+            "seven": seven ?? NSNull()
+        ]
+        cachedUsageResponse = try? JSONSerialization.data(withJSONObject: ["claude": claude])
+        appendHistory(five: _currentFive, seven: _currentSeven,
+                      fiveResetAt: five?["resetAt"] as? Double)
     }
 
     private func makeUsageJSON() -> Data {
         if cachedUsageResponse == nil { rebuildUsageCache() }
-        return cachedUsageResponse ?? Data("{}".utf8)
-    }
-
-    private func normalizeWindow(_ win: [String: Any]?) -> Any {
-        guard let win, let used = (win["used_percentage"] as? NSNumber)?.doubleValue else { return NSNull() }
-        if let resetsAt = (win["resets_at"] as? NSNumber)?.doubleValue,
-           Date(timeIntervalSince1970: resetsAt) < Date() {
-            return NSNull()
-        }
-        var out: [String: Any] = ["used": used]
-        if let resetsAt = (win["resets_at"] as? NSNumber)?.doubleValue { out["resetAt"] = resetsAt * 1000 }
-        return out
+        return cachedUsageResponse ?? Data(#"{"claude":{"fetchedAt":null,"five":null,"seven":null}}"#.utf8)
     }
 
     // MARK: - History
 
     private func appendHistory(five: Double?, seven: Double?, fiveResetAt: Double? = nil) {
         let now = Date().timeIntervalSince1970 * 1000
-        guard now - lastHistoryTs >= 30_000, five != nil || seven != nil else { return }
+        guard now - lastHistoryTs >= C.minSampleIntervalMs, five != nil || seven != nil else { return }
 
-        // 若 gap > 30 分鐘，用線性插值補假資料點讓 sparkline 平滑
         let gapMs = now - lastHistoryTs
-        if gapMs > 1_800_000, let currentFive = five, let resetAt = fiveResetAt {
-            let windowStartMs = resetAt - 18_000_000 // 5h window
-            let backfillFrom = lastHistoryTs > windowStartMs ? lastHistoryTs : windowStartMs
-            let startFive = lastHistoryTs > windowStartMs
-                ? (history.last?["five"] as? Double ?? 0.0)
-                : 0.0
-            var t = backfillFrom + 1_800_000
-            while t < now - 15_000 {
+        if gapMs > C.gapThresholdMs, let currentFive = five, let resetAt = fiveResetAt {
+            let windowStartMs = resetAt - C.fiveHourWindowMs
+            let backfillFrom  = max(lastHistoryTs, windowStartMs)
+            // #10b: Find last history point that actually carries a five value
+            let startFive = history.reversed().first(where: { $0["five"] != nil })?["five"] as? Double ?? 0.0
+            var t = backfillFrom + C.backfillStepMs
+            while t < now - C.backfillLeadMs {
                 let progress = (t - backfillFrom) / (now - backfillFrom)
                 history.append(["ts": t, "five": startFive + (currentFive - startFive) * progress])
-                t += 1_800_000
+                t += C.backfillStepMs
             }
         }
 
         lastHistoryTs = now
         var point: [String: Any] = ["ts": now]
-        if let five { point["five"] = five }
+        if let five  { point["five"]  = five  }
         if let seven { point["seven"] = seven }
         history.append(point)
-        if history.count > 1440 { history.removeFirst(history.count - 1440) }
-        if now - lastSaveHistoryTs >= 300_000 {
+        if history.count > C.maxHistoryPoints { history.removeFirst(history.count - C.maxHistoryPoints) }
+        if now - lastSaveHistoryTs >= C.saveIntervalMs {
             lastSaveHistoryTs = now
             saveHistory()
         }
     }
 
     private func makeHistoryJSON() -> Data {
-        let result: [String: Any] = ["points": history]
-        return (try? JSONSerialization.data(withJSONObject: result)) ?? Data(#"{"points":[]}"#.utf8)
+        (try? JSONSerialization.data(withJSONObject: ["points": history]))
+            ?? Data(#"{"points":[]}"#.utf8)
     }
 
     private func loadHistory() {

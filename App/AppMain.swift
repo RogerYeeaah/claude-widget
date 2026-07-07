@@ -37,12 +37,29 @@ final class Updater {
         return false
     }
 
+    init() {
+        // #21b: Auto-check 5 seconds after launch
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            self?.check()
+        }
+    }
+
     func check() {
         if case .checking = state { return }
         guard let repo = repoPath else { state = .idle; return }
         state = .checking
+
+        // #7: Revert to .idle if git fetch blocks for more than 30 seconds
+        let timeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard let self, case .checking = self.state else { return }
+            self.state = .idle
+        }
+
         Task.detached(priority: .userInitiated) { [weak self] in
             gitRun(repo, ["fetch", "origin", "--quiet"])
+            timeoutTask.cancel()
             let head   = gitOut(repo, ["rev-parse", "HEAD"])
             let remote = gitOut(repo, ["rev-parse", "origin/main"])
             let n: Int? = (head != nil && head != remote)
@@ -51,7 +68,17 @@ final class Updater {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 guard let h = head, let r = remote else { self.state = .idle; return }
-                if h == r { self.state = .upToDate; return }
+                // #9: n == 0 means local is ahead or equal — treat as up-to-date
+                if h == r || n == 0 {
+                    self.state = .upToDate
+                    // #21a: Auto-clear "Already up to date" after 5 seconds
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .seconds(5))
+                        guard let self, case .upToDate = self.state else { return }
+                        self.state = .idle
+                    }
+                    return
+                }
                 self.state = .available(n ?? 1)
             }
         }
@@ -59,21 +86,25 @@ final class Updater {
 
     func installUpdate() {
         guard let repo = repoPath else { return }
+        // #10c: Escape single quotes to prevent shell injection, use unique tmp filename
+        let safePath = repo.replacingOccurrences(of: "'", with: "'\\''")
+        let tmpFile = NSTemporaryDirectory() + "claude-widget-update-\(arc4random()).sh"
         let script = """
         #!/bin/bash
         until ! pgrep -xq ClaudeWidget; do sleep 0.3; done
-        cd '\(repo)' && git pull && ./deploy.sh
+        cd '\(safePath)' && git pull && ./deploy.sh
         """
-        let tmp = "/tmp/claude-widget-update.sh"
-        try? script.write(toFile: tmp, atomically: true, encoding: .utf8)
+        try? script.write(toFile: tmpFile, atomically: true, encoding: .utf8)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = ["-c", "chmod +x '\(tmp)' && nohup '\(tmp)' >/tmp/claude-widget-update.log 2>&1 &"]
-        try? p.run(); p.waitUntilExit()
+        p.arguments = ["-c", "chmod +x '\(tmpFile)' && nohup '\(tmpFile)' >/tmp/claude-widget-update.log 2>&1 &"]
+        guard (try? p.run()) != nil else { return }
+        p.waitUntilExit()
         NSApp.terminate(nil)
     }
 }
 
+// #17: Guard run() before waitUntilExit — avoids crash if git binary is missing
 private func gitOut(_ repo: String, _ args: [String]) -> String? {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
@@ -81,7 +112,8 @@ private func gitOut(_ repo: String, _ args: [String]) -> String? {
     let pipe = Pipe()
     p.standardOutput = pipe
     p.standardError = Pipe()
-    try? p.run(); p.waitUntilExit()
+    guard (try? p.run()) != nil else { return nil }
+    p.waitUntilExit()
     return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
@@ -91,7 +123,8 @@ private func gitRun(_ repo: String, _ args: [String]) {
     p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
     p.arguments = ["-C", repo] + args
     p.standardError = Pipe()
-    try? p.run(); p.waitUntilExit()
+    guard (try? p.run()) != nil else { return }
+    p.waitUntilExit()
 }
 
 // MARK: - App
@@ -106,7 +139,8 @@ struct ClaudeUsageApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        // #8: Named window group — enables openWindow(id: "main") from MenuBarExtra
+        WindowGroup(id: "main") {
             ContentView(updater: updater)
         }
         .windowResizability(.contentSize)
@@ -124,6 +158,8 @@ struct ClaudeUsageApp: App {
 
 struct MenuContent: View {
     let updater: Updater
+    // #8: Use openWindow instead of NSApp.windows.first (which may grab wrong window)
+    @Environment(\.openWindow) private var openWindow
 
     private var isChecking: Bool {
         if case .checking = updater.state { return true }
@@ -147,7 +183,7 @@ struct MenuContent: View {
         Button("Open Window") {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+            openWindow(id: "main")
         }
 
         Divider()
@@ -161,22 +197,24 @@ struct MenuContent: View {
 struct ContentView: View {
     let updater: Updater
     @State private var isLoginItem = SMAppService.mainApp.status == .enabled
-    @State private var serverRunning = UsageServer.shared.isRunning
-    @State private var currentFive: Double? = UsageServer.shared.currentFive
-    @State private var currentSeven: Double? = UsageServer.shared.currentSeven
+    @State private var serverRunning = false
+    @State private var currentFive: Double?
+    @State private var currentSeven: Double?
 
-    private let claudeColor = Color(red: 0.745, green: 0.455, blue: 0.341)
-    private let weeklyColor = Color(red: 0.463, green: 0.498, blue: 0.776)
+    private func barColor(_ pct: Double) -> Color { Theme.usageColor(pct, fallback: .secondary) }
 
-    private func barColor(_ pct: Double) -> Color {
-        pct >= 85 ? .red : pct >= 70 ? .orange : .secondary
+    private func refreshSnapshot() {
+        let snap = UsageServer.shared.snapshot  // #6: thread-safe read via queue.sync
+        serverRunning = snap.running
+        currentFive   = snap.five
+        currentSeven  = snap.seven
     }
 
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "chart.bar.fill")
                 .font(.system(size: 40))
-                .foregroundStyle(claudeColor)
+                .foregroundStyle(Theme.claude)
             Text("Claude Usage Widget")
                 .font(.headline)
             HStack(spacing: 6) {
@@ -226,13 +264,19 @@ struct ContentView: View {
         }
         .padding(32)
         .frame(width: 320)
+        .onAppear {
+            refreshSnapshot()
+            updater.check()  // #21b: Check for updates whenever window opens
+        }
         .onDisappear {
             NSApp.setActivationPolicy(.accessory)
         }
-        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
-            serverRunning = UsageServer.shared.isRunning
-            currentFive = UsageServer.shared.currentFive
-            currentSeven = UsageServer.shared.currentSeven
+        // #13: .task cancels automatically when view disappears — no leaked timer
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                refreshSnapshot()
+            }
         }
     }
 }
