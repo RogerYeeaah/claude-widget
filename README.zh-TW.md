@@ -9,12 +9,12 @@
 ## 功能特色
 
 - **Small、Medium、Large** 三種尺寸
-- 顯示各窗口剩餘重置時間（例：`resets in 2h 15m`）
+- **即時重置倒數** — 各窗口剩餘時間即時更新，不需等 widget 整體刷新
 - 用量顏色提示：正常 → 70% 轉橘色 → 85% 轉紅色
 - 每週額度以藍色顯示，與歷史圖表一致
-- 自適應刷新：用量 ≥ 90% 每 2 分鐘、≥ 70% 每 5 分鐘、其他每 10 分鐘
-- 資料過期提示：資料超過 30 分鐘未更新時，時間戳顯示橘色
-- App 無法連線時顯示「Server offline」提示
+- 自適應刷新：用量 ≥ 90% 每 2 分鐘、≥ 70% 每 5 分鐘、其他每 10 分鐘；離線時每 2 分鐘快速重試
+- **即時資料新鮮度** — 資料時間戳即時更新；超過 30 分鐘未更新顯示橘色
+- 區分兩種離線狀態：**「Server offline」**（App 無法連線）vs **「Waiting for data」**（Server 啟動中，尚未收到資料）
 - **歷史圖表**（Medium：4 小時折線，Large：12 小時雙線圖）
   - Y 軸動態縮放至實際資料範圍，便於閱讀
   - 資料中斷時（如 App 重啟）自動斷線
@@ -23,7 +23,7 @@
 - **Widget 選取預覽使用真實資料** — 桌面編輯小工具時顯示實際用量，而非假資料
 - **開機自動啟動**切換開關，內建於 App（無需手動設定 launchd）
 - **選單列圖示** — App 最小化至選單列；有更新時圖示變為 `↑`
-- **一鍵更新** — 右鍵選單列圖示 → 「Check for Updates」→「Install Update & Restart」
+- **一鍵更新** — 右鍵選單列圖示 → 「Check for Updates」→「Install Update & Restart」；App 啟動時也會自動檢查
 - **重置前淡化** — Large 尺寸中，5 小時窗口重置前的資料以低透明度顯示，讓當前窗口更清晰
 
 ## 系統需求
@@ -79,7 +79,7 @@ git pull && ./deploy.sh
 
 ## 運作原理
 
-App 在 `http://127.0.0.1:8787` 啟動一個嵌入式 HTTP server。Widget 每次刷新時從 `/api/usage` 和 `/api/history` 取得資料。Server 以檔案系統事件監聽 `~/.claude/usage-cache.json`，檔案變動時即時解析並快取；`/api/usage` 請求直接從記憶體快取回應（不需每次讀磁碟）。
+App 在 `http://127.0.0.1:8787` 啟動一個嵌入式 HTTP server（僅綁定 loopback，流量不離開本機）。Widget 每次刷新時從 `/api/usage` 和 `/api/history` 取得資料。Server 以檔案系統事件監聽 `~/.claude/usage-cache.json`，檔案變動時即時解析並快取；`/api/usage` 請求直接從記憶體快取回應（不需每次讀磁碟）。
 
 **Claude Code 2.1.196+** 停止自動寫入此檔案。內附的 `Stop` hook（`refresh-usage-cache.sh`）彌補了這個缺口：每次 Claude Code 回應後，hook 會發送一個最小化的 API 請求，擷取 rate-limit header 並寫入快取。若快取不到 10 分鐘，則跳過 API 呼叫。
 

@@ -9,12 +9,12 @@ A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/
 ## Features
 
 - **Small, Medium, Large** widget sizes
-- Reset countdown per window (e.g. `resets in 2h 15m`)
+- **Live reset countdown** per window — updates in real time without a full widget refresh
 - Color-coded usage: normal → orange at 70% → red at 85%
 - Weekly quota uses blue to match the history chart
-- Adaptive refresh: every 2 minutes at ≥ 90%, 5 minutes at ≥ 70%, 10 minutes otherwise
-- Stale data indicator: timestamp turns orange when data is over 30 minutes old
-- Shows "Server offline" (with server icon) when the app isn't reachable
+- Adaptive refresh: every 2 minutes at ≥ 90%, 5 minutes at ≥ 70%, 10 minutes otherwise; 2 minutes when offline to recover quickly
+- **Live age indicator** — data freshness text updates in real time; turns orange after 30 minutes
+- Distinguishes two offline states: **"Server offline"** (app unreachable) vs **"Waiting for data"** (server up, no data yet)
 - **History chart** (Medium: 4h sparkline, Large: 12h dual-line chart)
   - Dynamic Y-axis scaled to actual data range for clear visibility
   - Line breaks on gaps (e.g. after app restart)
@@ -23,7 +23,7 @@ A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/
 - **Widget gallery preview uses real data** — shows your actual usage instead of placeholder values
 - **Launch at login** toggle built into the app (no manual launchd setup)
 - **Menu bar icon** — app minimizes to menu bar; icon changes to `↑` when an update is available
-- **One-click updates** — right-click the menu bar icon → "Check for Updates" → "Install Update & Restart"
+- **One-click updates** — right-click the menu bar icon → "Check for Updates" → "Install Update & Restart"; also checks automatically on launch
 - **Pre-reset dimming** — in the Large widget, data before the 5-hour window reset is shown at low opacity so the current window stands out
 
 ## Requirements
@@ -79,7 +79,7 @@ git pull && ./deploy.sh
 
 ## How it works
 
-The app runs an embedded HTTP server on `http://127.0.0.1:8787`. The widget fetches `/api/usage` and `/api/history` from it on each refresh. The server watches `~/.claude/usage-cache.json` with a file-system event source and pre-parses it on change; `/api/usage` responses are served from an in-memory cache (no disk read per request).
+The app runs an embedded HTTP server on `http://127.0.0.1:8787` (loopback only — traffic never leaves the machine). The widget fetches `/api/usage` and `/api/history` from it on each refresh. The server watches `~/.claude/usage-cache.json` with a file-system event source and pre-parses it on change; `/api/usage` responses are served from an in-memory cache (no disk read per request).
 
 **Claude Code 2.1.196+** stopped writing this file automatically. The included `Stop` hook (`refresh-usage-cache.sh`) fills the gap: after each Claude Code response it makes a minimal API call, extracts the rate-limit headers, and writes them to the cache. The hook skips the API call if the cache is less than 10 minutes old.
 
