@@ -86,9 +86,22 @@ final class Updater {
 
     func installUpdate() {
         guard let repo = repoPath else { return }
+
+        // Require explicit confirmation before pulling and executing remote code
+        // (git pull + deploy.sh) — an update is arbitrary code execution on this machine.
+        let alert = NSAlert()
+        alert.messageText = "安裝更新？"
+        alert.informativeText = "將從 origin/main 執行 git pull 並跑 deploy.sh 重新部署，完成後 app 會自動重啟。"
+        alert.addButton(withTitle: "更新並重啟")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
         // #10c: Escape single quotes to prevent shell injection, use unique tmp filename
         let safePath = repo.replacingOccurrences(of: "'", with: "'\\''")
         let tmpFile = NSTemporaryDirectory() + "claude-widget-update-\(arc4random()).sh"
+        // Per-user temp path (not a fixed name in world-writable /tmp) avoids a symlink
+        // pre-placed by another local user redirecting our log writes.
+        let logFile = NSTemporaryDirectory() + "claude-widget-update-\(arc4random()).log"
         let script = """
         #!/bin/bash
         until ! pgrep -xq ClaudeWidget; do sleep 0.3; done
@@ -97,7 +110,7 @@ final class Updater {
         try? script.write(toFile: tmpFile, atomically: true, encoding: .utf8)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = ["-c", "chmod +x '\(tmpFile)' && nohup '\(tmpFile)' >/tmp/claude-widget-update.log 2>&1 &"]
+        p.arguments = ["-c", "chmod +x '\(tmpFile)' && nohup '\(tmpFile)' >'\(logFile)' 2>&1 &"]
         guard (try? p.run()) != nil else { return }
         p.waitUntilExit()
         NSApp.terminate(nil)
@@ -111,10 +124,15 @@ private func gitOut(_ repo: String, _ args: [String]) -> String? {
     p.arguments = ["-C", repo] + args
     let pipe = Pipe()
     p.standardOutput = pipe
-    p.standardError = Pipe()
+    // Discard stderr instead of piping it: an unread stderr Pipe deadlocks git
+    // once it fills the ~64 KB buffer (e.g. fetch progress on a large repo).
+    p.standardError = FileHandle.nullDevice
     guard (try? p.run()) != nil else { return nil }
+    // Read to EOF *before* waitUntilExit: if git's stdout exceeds the pipe buffer,
+    // git blocks on write while we'd block on wait — a classic pipe deadlock.
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
     p.waitUntilExit()
-    return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+    return String(data: data, encoding: .utf8)?
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
@@ -122,7 +140,9 @@ private func gitRun(_ repo: String, _ args: [String]) {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
     p.arguments = ["-C", repo] + args
-    p.standardError = Pipe()
+    // Discard output: piping stdout/stderr without reading deadlocks git once the buffer fills.
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
     guard (try? p.run()) != nil else { return }
     p.waitUntilExit()
 }
@@ -142,6 +162,12 @@ struct ClaudeUsageApp: App {
         // #8: Named window group — enables openWindow(id: "main") from MenuBarExtra
         WindowGroup(id: "main") {
             ContentView(updater: updater)
+                .onOpenURL { _ in
+                    // #U3: widget tap (claudewidget://open) — surface the main window.
+                    // SwiftUI opens a window for this group to deliver the URL if none exists.
+                    NSApp.setActivationPolicy(.regular)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
         }
         .windowResizability(.contentSize)
 
@@ -168,19 +194,19 @@ struct MenuContent: View {
 
     var body: some View {
         if case .upToDate = updater.state {
-            Text("Already up to date").foregroundStyle(.secondary)
+            Text("已是最新版本").foregroundStyle(.secondary)
         }
         if case .available(let n) = updater.state {
-            Text("\(n) update\(n == 1 ? "" : "s") available")
-            Button("Install Update & Restart") { updater.installUpdate() }
+            Text("有 \(n) 個更新可用")
+            Button("安裝更新並重啟") { updater.installUpdate() }
         }
 
-        Button(isChecking ? "Checking…" : "Check for Updates") { updater.check() }
+        Button(isChecking ? "檢查中…" : "檢查更新") { updater.check() }
             .disabled(isChecking)
 
         Divider()
 
-        Button("Open Window") {
+        Button("開啟視窗") {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: "main")
@@ -188,7 +214,7 @@ struct MenuContent: View {
 
         Divider()
 
-        Button("Quit ClaudeWidget") { NSApp.terminate(nil) }
+        Button("結束 ClaudeWidget") { NSApp.terminate(nil) }
     }
 }
 
@@ -215,11 +241,12 @@ struct ContentView: View {
             Image(systemName: "chart.bar.fill")
                 .font(.system(size: 40))
                 .foregroundStyle(Theme.claude)
-            Text("Claude Usage Widget")
+            Text("Claude 用量 Widget")
                 .font(.headline)
             HStack(spacing: 6) {
                 Circle().fill(serverRunning ? Color.green : Color.orange).frame(width: 8, height: 8)
-                Text(serverRunning ? "Server running on :8787" : "Port :8787 已由另一實例使用")
+                // #U7: neutral wording — the server can be down for reasons other than a port clash
+                Text(serverRunning ? "伺服器運行中 :8787" : "伺服器未運行（每 5 秒自動重試）")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -241,9 +268,9 @@ struct ContentView: View {
             if case .available(let n) = updater.state {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.up.circle.fill").foregroundStyle(.orange)
-                    Text("\(n) update\(n == 1 ? "" : "s") available")
+                    Text("有 \(n) 個更新可用")
                         .font(.caption).foregroundStyle(.secondary)
-                    Button("Update") { updater.installUpdate() }.font(.caption)
+                    Button("更新") { updater.installUpdate() }.font(.caption)
                 }
             }
             Text("右鍵點擊桌面 → 編輯小工具 → 加入 Claude Usage")

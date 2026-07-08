@@ -37,7 +37,9 @@ final class UsageServer {
         let home = FileManager.default.homeDirectoryForCurrentUser
         usageCacheURL = home.appendingPathComponent(".claude/usage-cache.json")
         historyFileURL = home.appendingPathComponent(".claude/widget-history.json")
-        loadHistory()
+        // `history` is queue-confined state and init runs on the main thread, so load
+        // it on the queue (also keeps file I/O off the main thread during app launch).
+        queue.async { [weak self] in self?.loadHistory() }
     }
 
     // #6: Thread-safe read — safe to call from any thread (including MainActor).
@@ -47,7 +49,13 @@ final class UsageServer {
 
     // MARK: - Start
 
+    // Called from App.init() on the main thread; hop onto `queue` so all mutable
+    // state (listener, cacheSource, _isRunning) is only ever touched there.
     func start() {
+        queue.async { [weak self] in self?.startOnQueue() }
+    }
+
+    private func startOnQueue() {
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
         // #1: Bind to loopback — widget traffic never leaves this machine
@@ -115,12 +123,27 @@ final class UsageServer {
 
     private func handle(_ connection: NWConnection) {
         connection.start(queue: queue)
+        // Drop half-open connections that never send a full request within 5 s, so a
+        // client that connects but stays silent can't hold connection objects forever.
+        queue.asyncAfter(deadline: .now() + 5) { [weak connection] in connection?.cancel() }
         connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, _, _ in
             guard let self, let data, !data.isEmpty else { connection.cancel(); return }
-            let path = self.extractPath(from: String(data: data, encoding: .utf8) ?? "")
-            let response = self.buildResponse(for: path)
+            let request = String(data: data, encoding: .utf8) ?? ""
+            // Reject requests whose Host isn't loopback — blocks DNS-rebinding attacks
+            // where a malicious site resolves its name to 127.0.0.1 and reaches us via the browser.
+            let response = self.isValidHost(request)
+                ? self.buildResponse(for: self.extractPath(from: request))
+                : self.forbiddenResponse()
             connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
         }
+    }
+
+    private func isValidHost(_ request: String) -> Bool {
+        guard let hostLine = request
+            .split(separator: "\r\n", omittingEmptySubsequences: true)
+            .first(where: { $0.lowercased().hasPrefix("host:") }) else { return false }
+        let host = hostLine.dropFirst("host:".count).trimmingCharacters(in: .whitespaces).lowercased()
+        return host == "127.0.0.1:\(C.port)" || host == "localhost:\(C.port)"
     }
 
     private func extractPath(from request: String) -> String {
@@ -137,8 +160,14 @@ final class UsageServer {
         case "/api/history": body = makeHistoryJSON()
         default:             body = Data("{}".utf8)
         }
-        let header = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: \(body.count)\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n"
+        // No CORS header: the widget uses URLSession (not a browser), so cross-origin
+        // reads are never needed. Omitting it stops any web page from reading usage data.
+        let header = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: \(body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
         return Data(header.utf8) + body
+    }
+
+    private func forbiddenResponse() -> Data {
+        Data("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
     }
 
     // MARK: - Usage (#12 Codable for usage-cache.json)

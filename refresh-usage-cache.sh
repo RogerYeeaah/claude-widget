@@ -6,7 +6,7 @@ CACHE="$HOME/.claude/usage-cache.json"
 
 # Skip if cache is fresh (< 600 seconds old)
 if [ -f "$CACHE" ]; then
-    FETCHED_AT=$(python3 -c "import json; print(json.load(open('$CACHE')).get('fetchedAt', 0))" 2>/dev/null || echo 0)
+    FETCHED_AT=$(CACHE="$CACHE" python3 -c "import json, os; print(json.load(open(os.environ['CACHE'])).get('fetchedAt', 0))" 2>/dev/null || echo 0)
     NOW_MS=$(python3 -c "import time; print(int(time.time() * 1000))")
     AGE_MS=$(( NOW_MS - FETCHED_AT ))
     if [ "$AGE_MS" -lt 600000 ]; then
@@ -31,9 +31,11 @@ fi
 
 # Minimal API call — capture response headers
 TMPFILE=$(mktemp)
+# Pass the token via a header file (process substitution) so it never appears in
+# curl's argv — otherwise any local user running `ps aux` could read the OAuth token.
 curl -s -D "$TMPFILE" -o /dev/null \
     -X POST "https://api.anthropic.com/v1/messages" \
-    -H "Authorization: Bearer $TOKEN" \
+    -H @<(printf 'Authorization: Bearer %s' "$TOKEN") \
     -H "anthropic-version: 2023-06-01" \
     -H "Content-Type: application/json" \
     -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \

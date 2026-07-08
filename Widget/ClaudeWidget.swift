@@ -129,10 +129,11 @@ struct ClaudeProvider: TimelineProvider {
         Task {
             let usage = await UsageData.fetch()
             let entry = ClaudeEntry(date: Date(), usage: usage)
-            let maxPct = [usage.claudeFive?.percent, usage.claudeSeven?.percent]
-                .compactMap { $0 }.max() ?? 0
-            // #19: Offline → 2 min so we pick up as soon as server recovers
-            let minutes = usage.isOffline ? 2 : maxPct >= 90 ? 2 : maxPct >= 70 ? 5 : 10
+            // #19: This .after() policy is only a fallback — the app pushes reloads via
+            // reloadAllTimelines() when usage-cache.json changes. Keep it well within the
+            // WidgetKit daily reload budget (~40-70/day) so the system doesn't throttle us;
+            // offline is a bit tighter to recover quickly once the server is back.
+            let minutes = usage.isOffline ? 5 : 15
             let next = Calendar.current.date(byAdding: .minute, value: minutes, to: Date())!
             completion(Timeline(entries: [entry], policy: .after(next)))
         }
@@ -171,20 +172,31 @@ struct UsageColumn: View {
 
     private var pct: Double { window?.percent ?? 0 }
     private var valueColor: Color { Theme.usageColor(pct, fallback: tintColor) }
+    private var isWarning: Bool { window != nil && pct >= 85 }
+
+    private var a11yLabel: String {
+        guard window != nil else { return "\(label) 無資料" }
+        return "\(label) 用量 \(Int(pct.rounded()))%" + (isWarning ? "，接近上限" : "")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
-                Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                Text(label).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 Spacer()
-                Group {
+                HStack(spacing: 3) {
+                    // Non-color cue so color-blind users still see the near-limit warning
+                    if isWarning {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(valueColor)
+                    }
                     if let w = window {
                         Text("\(Int(w.percent.rounded()))%").foregroundStyle(valueColor)
                     } else {
                         Text("--").foregroundStyle(.secondary)
                     }
                 }
-                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .font(.system(.title2, design: .rounded).weight(.bold))
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -194,18 +206,21 @@ struct UsageColumn: View {
                 }
             }
             .frame(height: 5)
-            // #18: Live reset countdown using .relative style — updates without new timeline entry
+            // #18: Live reset countdown — timerInterval stops at 0 rather than counting up past reset
             Group {
                 if let date = window?.resetAt, date > .now {
                     HStack(spacing: 2) {
-                        Text("resets").font(.system(size: 10)).foregroundStyle(.tertiary)
-                        Text(date, style: .relative).font(.system(size: 10)).foregroundStyle(.tertiary)
+                        Text("重置").font(.caption2).foregroundStyle(.tertiary)
+                        Text(timerInterval: .now...date, countsDown: true)
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }
                 } else {
-                    Text(" ").font(.system(size: 10))
+                    Text(" ").font(.caption2)
                 }
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(a11yLabel)
     }
 }
 
@@ -265,7 +280,7 @@ struct SparklineChart: View {
             }
             if let reset = lastFiveReset {
                 RuleMark(x: .value("Reset", reset))
-                    .foregroundStyle(Theme.claude.opacity(0.18))
+                    .foregroundStyle(Theme.claude.opacity(0.30))  // #U8: was 0.18, too faint on light backgrounds
                     .lineStyle(StrokeStyle(lineWidth: 1))
             }
         }
@@ -273,6 +288,7 @@ struct SparklineChart: View {
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartLegend(.hidden)
+        .accessibilityHidden(true)  // #U2: trend chart is decorative; numbers are read by UsageColumn
     }
 }
 
@@ -359,7 +375,7 @@ struct FullChart: View {
             }
             ForEach(Array(fiveResets.enumerated()), id: \.offset) { _, reset in
                 RuleMark(x: .value("5h Reset", reset))
-                    .foregroundStyle(Theme.claude.opacity(0.22))
+                    .foregroundStyle(Theme.claude.opacity(0.30))  // #U8: was 0.22
                     .lineStyle(StrokeStyle(lineWidth: 1))
                 PointMark(x: .value("t", reset), y: .value("%", domain.upperBound))
                     .opacity(0)
@@ -372,7 +388,7 @@ struct FullChart: View {
             if let reset = lastSevenReset {
                 // #10a: 7d reset uses weeklyColor, not claudeColor
                 RuleMark(x: .value("7d Reset", reset))
-                    .foregroundStyle(Theme.weekly.opacity(0.22))
+                    .foregroundStyle(Theme.weekly.opacity(0.30))  // #U8: was 0.22
                     .lineStyle(StrokeStyle(lineWidth: 1))
                 PointMark(x: .value("t", reset), y: .value("%", domain.upperBound))
                     .opacity(0)
@@ -403,6 +419,7 @@ struct FullChart: View {
             }
         }
         .chartLegend(.hidden)
+        .accessibilityHidden(true)  // #U2: trend chart is decorative; numbers are read by UsageColumn
     }
 }
 
@@ -410,13 +427,16 @@ struct FullChart: View {
 struct OfflineView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.claude)
+            Text("Claude").font(.headline).foregroundStyle(Theme.claude)
             Spacer()
             HStack {
                 Spacer()
                 VStack(spacing: 6) {
                     Image(systemName: "server.rack").font(.system(size: 22)).foregroundStyle(.secondary)
-                    Text("Server offline").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text("伺服器離線").font(.caption).foregroundStyle(.secondary)
+                    // #U3: tell the user how to recover (widgetURL below launches the app)
+                    Text("點擊開啟 ClaudeWidget").font(.caption2).foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
                 }
                 Spacer()
             }
@@ -431,13 +451,13 @@ struct OfflineView: View {
 struct WaitingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.claude)
+            Text("Claude").font(.headline).foregroundStyle(Theme.claude)
             Spacer()
             HStack {
                 Spacer()
                 VStack(spacing: 6) {
                     Image(systemName: "clock").font(.system(size: 22)).foregroundStyle(.secondary)
-                    Text("Waiting for data").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text("等待資料").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
@@ -453,12 +473,12 @@ private struct WidgetHeader: View {
     var bottomPadding: CGFloat = 10
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text("Claude").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.claude)
+            Text("Claude").font(.headline).foregroundStyle(Theme.claude)
             Spacer()
             // #18: Text(.relative) updates live in the widget without new timeline entries
             if let t = fetchedAt {
                 Text(t, style: .relative)
-                    .font(.system(size: 11))
+                    .font(.caption2)
                     .foregroundStyle(isStale(t) ? Color.orange : Color.secondary.opacity(0.5))
             }
         }
@@ -473,9 +493,9 @@ struct SmallView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetHeader(fetchedAt: entry.usage.fetchedAt)
-            UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
+            UsageColumn(label: "5 小時", window: entry.usage.claudeFive)
             Spacer().frame(height: 10)
-            UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: Theme.weekly)
+            UsageColumn(label: "每週", window: entry.usage.claudeSeven, tintColor: Theme.weekly)
         }
         .padding(14)
         .containerBackground(for: .widget) { Color.clear }
@@ -506,9 +526,9 @@ struct MediumView: View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetHeader(fetchedAt: entry.usage.fetchedAt)
             HStack(alignment: .top, spacing: 20) {
-                UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
+                UsageColumn(label: "5 小時", window: entry.usage.claudeFive)
                 Divider()
-                UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: Theme.weekly)
+                UsageColumn(label: "每週", window: entry.usage.claudeSeven, tintColor: Theme.weekly)
             }
             if sparkPoints.count >= 3 {
                 Spacer().frame(height: 8)
@@ -550,17 +570,26 @@ struct LargeView: View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetHeader(fetchedAt: entry.usage.fetchedAt, bottomPadding: 12)
             HStack(alignment: .top, spacing: 20) {
-                UsageColumn(label: "5 Hours", window: entry.usage.claudeFive)
+                UsageColumn(label: "5 小時", window: entry.usage.claudeFive)
                 Divider()
-                UsageColumn(label: "Weekly", window: entry.usage.claudeSeven, tintColor: Theme.weekly)
+                UsageColumn(label: "每週", window: entry.usage.claudeSeven, tintColor: Theme.weekly)
             }
             Spacer().frame(height: 14)
             HStack(spacing: 10) {
-                Circle().fill(Theme.claude).frame(width: 7, height: 7)
-                Text("5 Hours").font(.system(size: 10)).foregroundStyle(.secondary)
-                Circle().fill(Theme.weekly).frame(width: 7, height: 7)
-                Text("Weekly").font(.system(size: 10)).foregroundStyle(.secondary)
+                // #U5: legend swatches mirror the chart's line styles (solid 5h vs dashed weekly)
+                HStack(spacing: 4) {
+                    RoundedRectangle(cornerRadius: 1).fill(Theme.claude).frame(width: 14, height: 2)
+                    Text("5 小時").font(.caption2).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 4) {
+                    HStack(spacing: 2) {
+                        RoundedRectangle(cornerRadius: 1).fill(Theme.weekly).frame(width: 5, height: 2)
+                        RoundedRectangle(cornerRadius: 1).fill(Theme.weekly).frame(width: 5, height: 2)
+                    }
+                    Text("每週").font(.caption2).foregroundStyle(.secondary)
+                }
             }
+            .accessibilityHidden(true)
             Spacer().frame(height: 6)
             if chartPoints.count >= 3 {
                 FullChart(points: chartPoints, fiveResets: visibleFiveResets, lastSevenReset: lastSevenReset)
@@ -568,7 +597,7 @@ struct LargeView: View {
             } else {
                 HStack {
                     Spacer()
-                    Text("Collecting history…").font(.system(size: 11)).foregroundStyle(.tertiary)
+                    Text("收集紀錄中…").font(.caption).foregroundStyle(.tertiary)
                     Spacer()
                 }
                 .frame(maxHeight: .infinity)
@@ -583,6 +612,12 @@ struct ClaudeWidgetView: View {
     @Environment(\.widgetFamily) var family
     let entry: ClaudeEntry
     var body: some View {
+        content
+            // #U3: tapping the widget opens the app (handled via onOpenURL in AppMain)
+            .widgetURL(URL(string: "claudewidget://open"))
+    }
+
+    @ViewBuilder private var content: some View {
         if entry.usage.isOffline {
             OfflineView()
         } else if !entry.usage.hasData {
@@ -606,7 +641,7 @@ struct ClaudeWidget: Widget {
         StaticConfiguration(kind: kind, provider: ClaudeProvider()) { entry in
             ClaudeWidgetView(entry: entry)
         }
-        .configurationDisplayName("Claude Usage")
+        .configurationDisplayName("Claude 用量")
         .description("Claude Code 用量")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
