@@ -284,13 +284,47 @@ struct FullChart: View {
     private var domain: ClosedRange<Double> { yDomain(points) }
     private var topLabel: Int { Int(domain.upperBound.rounded()) }
 
+    // Catmull-Rom spline value at t ∈ (0,1) given four control points
+    private func crSpline(_ p0: Double, _ p1: Double, _ p2: Double, _ p3: Double, t: Double) -> Double {
+        let t2 = t * t, t3 = t2 * t
+        return 0.5 * ((2*p1) + (-p0+p2)*t + (2*p0-5*p1+4*p2-p3)*t2 + (-p0+3*p1-3*p2+p3)*t3)
+    }
+
+    // Insert (steps-1) interpolated points between each consecutive pair
+    private func crInterp(_ pts: [HistoryPoint], steps: Int = 4) -> [HistoryPoint] {
+        guard pts.count >= 2 else { return pts }
+        var out: [HistoryPoint] = []
+        for i in 0..<(pts.count - 1) {
+            out.append(pts[i])
+            let p0 = pts[max(0, i - 1)], p1 = pts[i]
+            let p2 = pts[i + 1], p3 = pts[min(pts.count - 1, i + 2)]
+            for s in 1..<steps {
+                let t  = Double(s) / Double(steps)
+                let ts = p1.ts + (p2.ts - p1.ts) * t
+                let five: Double?  = (p1.five  != nil && p2.five  != nil)
+                    ? max(0, min(100, crSpline(p0.five  ?? p1.five!, p1.five!, p2.five!, p3.five  ?? p2.five!,  t: t))) : nil
+                let seven: Double? = (p1.seven != nil && p2.seven != nil)
+                    ? max(0, min(100, crSpline(p0.seven ?? p1.seven!, p1.seven!, p2.seven!, p3.seven ?? p2.seven!, t: t))) : nil
+                out.append(HistoryPoint(ts: ts, date: Date(timeIntervalSince1970: ts / 1000),
+                                        five: five, seven: seven))
+            }
+        }
+        if let last = pts.last { out.append(last) }
+        return out
+    }
+
+    // Split segment at reset boundary before interpolating so values never blend across a reset
+    private func interpSeg(_ seg: [HistoryPoint]) -> [HistoryPoint] {
+        guard let reset = lastFiveReset else { return crInterp(seg) }
+        return crInterp(seg.filter { $0.date < reset }) + crInterp(seg.filter { $0.date >= reset })
+    }
+
     var body: some View {
-        let pts = points
         Chart {
             // Single loop keeps Chart domain intact; five series uses different keys
             // pre/post reset so the two segments aren't visually connected
-            ForEach(Array(segments(pts, gap: 2100).enumerated()), id: \.offset) { idx, seg in
-                ForEach(seg) { p in
+            ForEach(Array(segments(points, gap: 2100).enumerated()), id: \.offset) { idx, seg in
+                ForEach(interpSeg(seg)) { p in
                     if let v = p.five {
                         let side = lastFiveReset.map { p.date >= $0 ? "b" : "a" } ?? "a"
                         LineMark(x: .value("t", p.date), y: .value("%", v),
