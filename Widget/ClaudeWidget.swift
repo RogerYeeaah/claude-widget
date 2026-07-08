@@ -304,33 +304,20 @@ struct FullChart: View {
     }
 
     var body: some View {
-        // Compute smoothed once; split 5h at reset boundary so pre/post aren't connected
         let pts = smoothed
-        let fiveParts: [[HistoryPoint]] = {
-            guard let reset = lastFiveReset else { return segments(pts, gap: 2100) }
-            let before = pts.filter { $0.date < reset }
-            let after  = pts.filter { $0.date >= reset }
-            return (before.isEmpty ? [] : segments(before, gap: 2100))
-                 + (after.isEmpty  ? [] : segments(after,  gap: 2100))
-        }()
-        let sevenParts = segments(pts, gap: 2100)
-
         Chart {
-            // 5h line — split at reset to remove vertical drop artifact
-            ForEach(Array(fiveParts.enumerated()), id: \.offset) { idx, seg in
+            // Single loop keeps Chart domain intact; five series uses different keys
+            // pre/post reset so the two segments aren't visually connected
+            ForEach(Array(segments(pts, gap: 2100).enumerated()), id: \.offset) { idx, seg in
                 ForEach(seg) { p in
                     if let v = p.five {
+                        let side = lastFiveReset.map { p.date >= $0 ? "b" : "a" } ?? "a"
                         LineMark(x: .value("t", p.date), y: .value("%", v),
-                                 series: .value("s", "five-\(idx)"))
+                                 series: .value("s", "five-\(idx)\(side)"))
                             .foregroundStyle(Theme.claude)
                             .interpolationMethod(.catmullRom)
                             .lineStyle(StrokeStyle(lineWidth: 1.2))
                     }
-                }
-            }
-            // Weekly line — continuous segments
-            ForEach(Array(sevenParts.enumerated()), id: \.offset) { idx, seg in
-                ForEach(seg) { p in
                     if let v = p.seven {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
                                  series: .value("s", "seven-\(idx)"))
