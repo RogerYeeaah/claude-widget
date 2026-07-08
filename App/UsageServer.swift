@@ -147,6 +147,11 @@ final class UsageServer {
         let fetchedAt: Double?
         let rateLimits: RateLimits?
 
+        enum CodingKeys: String, CodingKey {
+            case fetchedAt
+            case rateLimits = "rate_limits"
+        }
+
         struct RateLimits: Decodable {
             let fiveHour: RateLimit?
             let sevenDay: RateLimit?
