@@ -475,12 +475,12 @@ struct LargeView: View {
     let entry: ClaudeEntry
 
     private var chartPoints: [HistoryPoint] {
-        let cutoff = Date().addingTimeInterval(-12 * 3600)
+        let cutoff = Date().addingTimeInterval(-15 * 3600)
         let recent = entry.usage.history.filter { $0.date >= cutoff }
         let span = (recent.last?.ts ?? 0) - (recent.first?.ts ?? 0)
         // Fallback to full history when recent data spans less than 1 hour
         guard recent.count >= 3, span > 3_600_000 else {
-            return Array(entry.usage.history.suffix(40))
+            return Array(entry.usage.history.suffix(30))
         }
         return recent
     }
@@ -488,13 +488,13 @@ struct LargeView: View {
     private var lastFiveReset: Date? {
         guard let resetAt = entry.usage.claudeFive?.resetAt else { return nil }
         let lastReset = resetAt.addingTimeInterval(-5 * 3600)
-        return lastReset >= Date().addingTimeInterval(-12 * 3600) ? lastReset : nil
+        return lastReset >= Date().addingTimeInterval(-15 * 3600) ? lastReset : nil
     }
 
     private var lastSevenReset: Date? {
         guard let resetAt = entry.usage.claudeSeven?.resetAt else { return nil }
         let lastReset = resetAt.addingTimeInterval(-7 * 24 * 3600)
-        return lastReset >= Date().addingTimeInterval(-12 * 3600) ? lastReset : nil
+        return lastReset >= Date().addingTimeInterval(-15 * 3600) ? lastReset : nil
     }
 
     var body: some View {
