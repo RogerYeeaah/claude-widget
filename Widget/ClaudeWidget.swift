@@ -301,10 +301,15 @@ struct FullChart: View {
             for s in 1..<steps {
                 let t  = Double(s) / Double(steps)
                 let ts = p1.ts + (p2.ts - p1.ts) * t
-                let five: Double?  = (p1.five  != nil && p2.five  != nil)
-                    ? max(0, min(100, crSpline(p0.five  ?? p1.five!, p1.five!, p2.five!, p3.five  ?? p2.five!,  t: t))) : nil
-                let seven: Double? = (p1.seven != nil && p2.seven != nil)
-                    ? max(0, min(100, crSpline(p0.seven ?? p1.seven!, p1.seven!, p2.seven!, p3.seven ?? p2.seven!, t: t))) : nil
+                // Clamp to [min(p1,p2), max(p1,p2)] to prevent Catmull-Rom overshoot dips
+                let five: Double?  = (p1.five  != nil && p2.five  != nil) ? {
+                    let lo = min(p1.five!, p2.five!), hi = max(p1.five!, p2.five!)
+                    return max(lo, min(hi, crSpline(p0.five  ?? p1.five!, p1.five!, p2.five!, p3.five  ?? p2.five!,  t: t)))
+                }() : nil
+                let seven: Double? = (p1.seven != nil && p2.seven != nil) ? {
+                    let lo = min(p1.seven!, p2.seven!), hi = max(p1.seven!, p2.seven!)
+                    return max(lo, min(hi, crSpline(p0.seven ?? p1.seven!, p1.seven!, p2.seven!, p3.seven ?? p2.seven!, t: t)))
+                }() : nil
                 out.append(HistoryPoint(ts: ts, date: Date(timeIntervalSince1970: ts / 1000),
                                         five: five, seven: seven))
             }
