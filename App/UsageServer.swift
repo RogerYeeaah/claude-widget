@@ -8,12 +8,12 @@ final class UsageServer {
     // MARK: - Constants (#16)
     private enum C {
         static let port: UInt16 = 8787
-        static let minSampleIntervalMs: Double = 30_000     // 30 s
-        static let backfillStepMs: Double     = 1_800_000   // 30 min
+        static let minSampleIntervalMs: Double = 1_200_000   // 20 min
+        static let backfillStepMs: Double     = 1_200_000   // 20 min
         static let fiveHourWindowMs: Double   = 18_000_000  // 5 h
-        static let gapThresholdMs: Double     = 1_800_000   // 30 min gap → backfill
+        static let gapThresholdMs: Double     = 1_200_000   // 20 min gap → backfill
         static let saveIntervalMs: Double     = 300_000     // 5 min
-        static let maxHistoryPoints           = 1440        // 24 h at 1-min granularity
+        static let maxHistoryPoints           = 200         // ~2.8 days at 20-min granularity
         static let backfillLeadMs: Double     = 15_000      // stop backfill 15 s before now
     }
 
