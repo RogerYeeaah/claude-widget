@@ -358,7 +358,7 @@ struct FullChart: View {
             }
         }
         .chartXAxis {
-            AxisMarks(values: .stride(by: .hour, count: 3)) { value in
+            AxisMarks(values: .stride(by: .hour, count: 6)) { value in
                 AxisGridLine().foregroundStyle(Color.secondary.opacity(0.2))
                 if let date = value.as(Date.self) {
                     AxisValueLabel {
