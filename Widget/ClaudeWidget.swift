@@ -260,7 +260,7 @@ struct SparklineChart: View {
                              series: .value("s", "five"))
                         .foregroundStyle(Theme.claude.opacity(0.8))
                         .lineStyle(StrokeStyle(lineWidth: 1.0))
-                        .interpolationMethod(.monotone)
+                        .interpolationMethod(.linear)
                 }
             }
             if let reset = lastFiveReset {
@@ -315,14 +315,14 @@ struct FullChart: View {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
                                  series: .value("s", "five-\(idx)\(side)"))
                             .foregroundStyle(Theme.claude)
-                            .interpolationMethod(.catmullRom)
+                            .interpolationMethod(.linear)
                             .lineStyle(StrokeStyle(lineWidth: 1.2))
                     }
                     if let v = p.seven {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
                                  series: .value("s", "seven-\(idx)"))
                             .foregroundStyle(Theme.weekly)
-                            .interpolationMethod(.catmullRom)
+                            .interpolationMethod(.linear)
                             .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 3]))
                     }
                 }
