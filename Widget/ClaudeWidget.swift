@@ -284,27 +284,8 @@ struct FullChart: View {
     private var domain: ClosedRange<Double> { yDomain(points) }
     private var topLabel: Int { Int(domain.upperBound.rounded()) }
 
-    private var smoothed: [HistoryPoint] {
-        guard points.count > 2 else { return points }
-        let w = 6
-        var result = points.enumerated().map { (i, p) -> HistoryPoint in
-            let lo = max(0, i - w), hi = min(points.count - 1, i + w)
-            var fSum = 0.0, sSum = 0.0, wSumF = 0.0, wSumS = 0.0
-            for j in lo...hi {
-                let weight = exp(-Double((j - i) * (j - i)) / Double(w))
-                if let v = points[j].five  { fSum += weight * v; wSumF += weight }
-                if let v = points[j].seven { sSum += weight * v; wSumS += weight }
-            }
-            return HistoryPoint(ts: p.ts, date: p.date,
-                                five:  p.five  == nil ? nil : (wSumF > 0 ? fSum / wSumF : p.five),
-                                seven: p.seven == nil ? nil : (wSumS > 0 ? sSum / wSumS : p.seven))
-        }
-        if let last = points.last { result[result.count - 1] = last }
-        return result
-    }
-
     var body: some View {
-        let pts = smoothed
+        let pts = points
         Chart {
             // Single loop keeps Chart domain intact; five series uses different keys
             // pre/post reset so the two segments aren't visually connected
