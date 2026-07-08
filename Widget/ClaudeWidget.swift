@@ -278,7 +278,7 @@ struct SparklineChart: View {
 
 struct FullChart: View {
     let points: [HistoryPoint]
-    var lastFiveReset: Date? = nil
+    var fiveResets: [Date] = []
     var lastSevenReset: Date? = nil
 
     private var domain: ClosedRange<Double> { yDomain(points) }
@@ -313,10 +313,21 @@ struct FullChart: View {
         return out
     }
 
-    // Split segment at reset boundary before interpolating so values never blend across a reset
+    // Which 5h window does this date fall in (used as series key to avoid cross-reset connections)
+    private func fiveWindowIdx(_ date: Date) -> Int {
+        fiveResets.filter { date >= $0 }.count
+    }
+
+    // Split segment at every five-reset boundary before interpolating
     private func interpSeg(_ seg: [HistoryPoint]) -> [HistoryPoint] {
-        guard let reset = lastFiveReset else { return crInterp(seg) }
-        return crInterp(seg.filter { $0.date < reset }) + crInterp(seg.filter { $0.date >= reset })
+        guard !fiveResets.isEmpty else { return crInterp(seg) }
+        let boundaries = ([Date.distantPast] + fiveResets.sorted() + [Date.distantFuture])
+        var result: [HistoryPoint] = []
+        for i in 0..<(boundaries.count - 1) {
+            let lo = boundaries[i], hi = boundaries[i + 1]
+            result += crInterp(seg.filter { $0.date >= lo && $0.date < hi })
+        }
+        return result
     }
 
     var body: some View {
@@ -326,9 +337,8 @@ struct FullChart: View {
             ForEach(Array(segments(points, gap: 2100).enumerated()), id: \.offset) { idx, seg in
                 ForEach(interpSeg(seg)) { p in
                     if let v = p.five {
-                        let side = lastFiveReset.map { p.date >= $0 ? "b" : "a" } ?? "a"
                         LineMark(x: .value("t", p.date), y: .value("%", v),
-                                 series: .value("s", "five-\(idx)\(side)"))
+                                 series: .value("s", "five-\(idx)-\(fiveWindowIdx(p.date))"))
                             .foregroundStyle(Theme.claude)
                             .interpolationMethod(.linear)
                             .lineStyle(StrokeStyle(lineWidth: 1.2))
@@ -342,7 +352,7 @@ struct FullChart: View {
                     }
                 }
             }
-            if let reset = lastFiveReset {
+            ForEach(Array(fiveResets.enumerated()), id: \.offset) { _, reset in
                 RuleMark(x: .value("5h Reset", reset))
                     .foregroundStyle(Theme.claude.opacity(0.22))
                     .lineStyle(StrokeStyle(lineWidth: 1))
@@ -510,19 +520,19 @@ struct LargeView: View {
 
     private var chartPoints: [HistoryPoint] {
         let cutoff = Date().addingTimeInterval(-8 * 3600)
-        let recent = entry.usage.history.filter { $0.date >= cutoff }
-        let span = (recent.last?.ts ?? 0) - (recent.first?.ts ?? 0)
-        // Fallback to full history when recent data spans less than 1 hour
-        guard recent.count >= 3, span > 3_600_000 else {
-            return Array(entry.usage.history.suffix(48))
-        }
-        return recent
+        return entry.usage.history.filter { $0.date >= cutoff }
     }
 
-    private var lastFiveReset: Date? {
-        guard let resetAt = entry.usage.claudeFive?.resetAt else { return nil }
-        let lastReset = resetAt.addingTimeInterval(-5 * 3600)
-        return lastReset >= Date().addingTimeInterval(-8 * 3600) ? lastReset : nil
+    private var visibleFiveResets: [Date] {
+        guard let resetAt = entry.usage.claudeFive?.resetAt else { return [] }
+        let windowStart = Date().addingTimeInterval(-8 * 3600)
+        var resets: [Date] = []
+        var t = resetAt.addingTimeInterval(-5 * 3600) // most recent past reset
+        while t >= windowStart {
+            resets.append(t)
+            t = t.addingTimeInterval(-5 * 3600)
+        }
+        return resets.sorted()
     }
 
     private var lastSevenReset: Date? {
@@ -548,7 +558,7 @@ struct LargeView: View {
             }
             Spacer().frame(height: 6)
             if chartPoints.count >= 3 {
-                FullChart(points: chartPoints, lastFiveReset: lastFiveReset, lastSevenReset: lastSevenReset)
+                FullChart(points: chartPoints, fiveResets: visibleFiveResets, lastSevenReset: lastSevenReset)
                     .frame(maxHeight: .infinity)
             } else {
                 HStack {
