@@ -458,8 +458,12 @@ struct MediumView: View {
     private var sparkPoints: [HistoryPoint] {
         let cutoff = Date().addingTimeInterval(-4 * 3600)
         let recent = entry.usage.history.filter { $0.date >= cutoff }
-        guard recent.count < 3 else { return recent }
-        return Array(entry.usage.history.suffix(20))
+        let span = (recent.last?.ts ?? 0) - (recent.first?.ts ?? 0)
+        // Fallback to full history when recent data spans less than 30 min
+        guard recent.count >= 3, span > 1_800_000 else {
+            return Array(entry.usage.history.suffix(20))
+        }
+        return recent
     }
 
     private var lastFiveReset: Date? {
@@ -492,8 +496,12 @@ struct LargeView: View {
     private var chartPoints: [HistoryPoint] {
         let cutoff = Date().addingTimeInterval(-12 * 3600)
         let recent = entry.usage.history.filter { $0.date >= cutoff }
-        guard recent.count < 3 else { return recent }
-        return Array(entry.usage.history.suffix(40))
+        let span = (recent.last?.ts ?? 0) - (recent.first?.ts ?? 0)
+        // Fallback to full history when recent data spans less than 1 hour
+        guard recent.count >= 3, span > 3_600_000 else {
+            return Array(entry.usage.history.suffix(40))
+        }
+        return recent
     }
 
     private var lastFiveReset: Date? {
