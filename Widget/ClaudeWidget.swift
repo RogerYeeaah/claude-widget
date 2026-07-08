@@ -304,9 +304,20 @@ struct FullChart: View {
     }
 
     var body: some View {
+        // Compute smoothed once; split 5h at reset boundary so pre/post aren't connected
+        let pts = smoothed
+        let fiveParts: [[HistoryPoint]] = {
+            guard let reset = lastFiveReset else { return segments(pts, gap: 2100) }
+            let before = pts.filter { $0.date < reset }
+            let after  = pts.filter { $0.date >= reset }
+            return (before.isEmpty ? [] : segments(before, gap: 2100))
+                 + (after.isEmpty  ? [] : segments(after,  gap: 2100))
+        }()
+        let sevenParts = segments(pts, gap: 2100)
+
         Chart {
-            // #2: Unique series name per segment — prevents Chart merging separate segments
-            ForEach(Array(segments(smoothed, gap: 2100).enumerated()), id: \.offset) { idx, seg in
+            // 5h line — split at reset to remove vertical drop artifact
+            ForEach(Array(fiveParts.enumerated()), id: \.offset) { idx, seg in
                 ForEach(seg) { p in
                     if let v = p.five {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
@@ -315,6 +326,11 @@ struct FullChart: View {
                             .interpolationMethod(.catmullRom)
                             .lineStyle(StrokeStyle(lineWidth: 1.2))
                     }
+                }
+            }
+            // Weekly line — continuous segments
+            ForEach(Array(sevenParts.enumerated()), id: \.offset) { idx, seg in
+                ForEach(seg) { p in
                     if let v = p.seven {
                         LineMark(x: .value("t", p.date), y: .value("%", v),
                                  series: .value("s", "seven-\(idx)"))
