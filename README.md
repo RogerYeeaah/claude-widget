@@ -28,7 +28,7 @@ A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/
 
 ## Requirements
 
-- macOS 14.0+
+- macOS 26+
 - Xcode with your Apple ID signed in (**Xcode → Settings → Accounts**)
 
 > No separate dashboard server needed — the HTTP server runs inside the app itself.
@@ -89,4 +89,4 @@ History is accumulated in memory and flushed to `~/.claude/widget-history.json` 
 
 - Each person must build the widget with their own Apple ID — pre-built binaries can't be distributed without a paid Apple Developer account
 - The history chart shows "Collecting history…" until enough data points accumulate
-- Tested on macOS 26 with Xcode 26
+- Tested on macOS 26 (Tahoe) with Xcode 26

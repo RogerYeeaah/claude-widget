@@ -28,7 +28,7 @@
 
 ## 系統需求
 
-- macOS 14.0+
+- macOS 26+
 - 已登入 Apple ID 的 Xcode（**Xcode → Settings → Accounts**）
 
 > 不需要額外的 dashboard 伺服器 — HTTP server 直接運行在 App 內部。
@@ -89,4 +89,4 @@ App 在 `http://127.0.0.1:8787` 啟動一個嵌入式 HTTP server（僅綁定 lo
 
 - 每位使用者需以自己的 Apple ID 自行編譯 — 沒有付費開發者帳號無法散布已編譯的二進位檔
 - 歷史圖表在累積足夠資料點前會顯示「Collecting history…」
-- 已在 macOS 26 + Xcode 26 上測試
+- 已在 macOS 26 (Tahoe) + Xcode 26 上測試
