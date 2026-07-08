@@ -442,7 +442,7 @@ struct MediumView: View {
         let span = (recent.last?.ts ?? 0) - (recent.first?.ts ?? 0)
         // Fallback to full history when recent data spans less than 30 min
         guard recent.count >= 3, span > 1_800_000 else {
-            return Array(entry.usage.history.suffix(12))
+            return Array(entry.usage.history.suffix(24))
         }
         return recent
     }
@@ -480,7 +480,7 @@ struct LargeView: View {
         let span = (recent.last?.ts ?? 0) - (recent.first?.ts ?? 0)
         // Fallback to full history when recent data spans less than 1 hour
         guard recent.count >= 3, span > 3_600_000 else {
-            return Array(entry.usage.history.suffix(24))
+            return Array(entry.usage.history.suffix(48))
         }
         return recent
     }
