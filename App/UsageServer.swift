@@ -15,6 +15,8 @@ final class UsageServer {
         static let saveIntervalMs: Double     = 300_000     // 5 min
         static let maxHistoryPoints           = 300         // ~2 days at 10-min granularity
         static let backfillLeadMs: Double     = 15_000      // stop backfill 15 s before now
+        static let sevenDayWindowMs: Double   = 604_800_000 // 7 d
+        static let maxBackfillMs: Double      = 28_800_000  // 8 h, aligns with the Large chart window
     }
 
     // All mutable state lives on `queue`
@@ -232,7 +234,8 @@ final class UsageServer {
         ]
         cachedUsageResponse = try? JSONSerialization.data(withJSONObject: ["claude": claude])
         appendHistory(five: _currentFive, seven: _currentSeven,
-                      fiveResetAt: five?["resetAt"] as? Double)
+                      fiveResetAt: five?["resetAt"] as? Double,
+                      sevenResetAt: seven?["resetAt"] as? Double)
     }
 
     private func makeUsageJSON() -> Data {
@@ -242,20 +245,54 @@ final class UsageServer {
 
     // MARK: - History
 
-    private func appendHistory(five: Double?, seven: Double?, fiveResetAt: Double? = nil) {
+    private func appendHistory(five: Double?, seven: Double?,
+                               fiveResetAt: Double? = nil, sevenResetAt: Double? = nil) {
         let now = Date().timeIntervalSince1970 * 1000
         guard now - lastHistoryTs >= C.minSampleIntervalMs, five != nil || seven != nil else { return }
 
         let gapMs = now - lastHistoryTs
-        if gapMs > C.gapThresholdMs, let currentFive = five, let resetAt = fiveResetAt {
-            let windowStartMs = resetAt - C.fiveHourWindowMs
-            let backfillFrom  = max(lastHistoryTs, windowStartMs)
-            // #10b: Find last history point that actually carries a five value
-            let startFive = history.reversed().first(where: { $0["five"] != nil })?["five"] as? Double ?? 0.0
+        if gapMs > C.gapThresholdMs {
+            // Backfill the whole gap, capped at the 8h the Large chart shows (also handles
+            // the cold-start case where lastHistoryTs == 0).
+            let backfillFrom = max(lastHistoryTs, now - C.maxBackfillMs)
+
+            // five interpolation is only valid inside the current 5h window
+            let fiveFrom: Double? = {
+                guard five != nil, let resetAt = fiveResetAt else { return nil }
+                return max(backfillFrom, resetAt - C.fiveHourWindowMs)
+            }()
+            // #10b: Find last history point that actually carries each value
+            let startFive  = history.reversed().first(where: { $0["five"]  != nil })?["five"]  as? Double ?? 0.0
+            let startSeven = history.reversed().first(where: { $0["seven"] != nil })?["seven"] as? Double
+            // sevenResetAt is the *next* weekly reset; the last one is 7 days earlier
+            let lastSevenResetMs = sevenResetAt.map { $0 - C.sevenDayWindowMs }
+
             var t = backfillFrom + C.backfillStepMs
             while t < now - C.backfillLeadMs {
-                let progress = (t - backfillFrom) / (now - backfillFrom)
-                history.append(["ts": t, "five": startFive + (currentFive - startFive) * progress])
+                var point: [String: Any] = ["ts": t]
+
+                if let from = fiveFrom, let currentFive = five, t > from {
+                    let progress = (t - from) / (now - from)
+                    point["five"] = startFive + (currentFive - startFive) * progress
+                }
+
+                if let currentSeven = seven {
+                    if let resetMs = lastSevenResetMs, resetMs > backfillFrom, resetMs < now {
+                        // gap crosses the weekly reset: hold the old value before it,
+                        // then ramp from 0 to current after it
+                        if t < resetMs {
+                            if let s = startSeven { point["seven"] = s }
+                        } else {
+                            point["seven"] = currentSeven * ((t - resetMs) / (now - resetMs))
+                        }
+                    } else {
+                        // normal case: interpolate old → current; with no old value, hold current
+                        let s = startSeven ?? currentSeven
+                        point["seven"] = s + (currentSeven - s) * ((t - backfillFrom) / (now - backfillFrom))
+                    }
+                }
+
+                if point.count > 1 { history.append(point) }  // skip empty points
                 t += C.backfillStepMs
             }
         }

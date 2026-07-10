@@ -20,6 +20,7 @@ A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/
 - **History chart** (Medium: 4h sparkline, Large: 12h dual-line chart)
   - Dynamic Y-axis scaled to actual data range for clear visibility
   - Line breaks on gaps (e.g. after app restart)
+  - Back-fills gaps for **both** the 5h and weekly lines, so the weekly line isn't blank while collecting history
   - History persists across restarts (`~/.claude/widget-history.json`)
 - **App window shows live usage** — the companion window displays current 5h/weekly % with color coding, updated every 2 seconds
 - **Widget gallery preview uses real data** — shows your actual usage instead of placeholder values
@@ -87,7 +88,7 @@ For safety, the server only answers requests whose `Host` header is loopback (`1
 
 **Claude Code 2.1.196+** stopped writing this file automatically. The included `Stop` hook (`refresh-usage-cache.sh`) fills the gap: after each Claude Code response it makes a minimal API call, extracts the rate-limit headers, and writes them to the cache. The hook skips the API call if the cache is less than 10 minutes old.
 
-History is accumulated in memory and flushed to `~/.claude/widget-history.json` every 5 minutes and on app quit, so it survives restarts.
+History is accumulated in memory and flushed to `~/.claude/widget-history.json` every 5 minutes and on app quit, so it survives restarts. When a sampling gap appears (app was closed, machine asleep), the server back-interpolates points for both the 5h and weekly series — carrying forward the last known weekly value — so neither line reads as zero while catching up.
 
 ## Notes
 
