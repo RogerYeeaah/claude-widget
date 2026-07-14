@@ -16,12 +16,12 @@
 - **推播式刷新** — `usage-cache.json` 一變動 App 就立即刷新 widget；另有保底刷新每 15 分鐘（離線時 5 分鐘），控制在 WidgetKit 每日刷新額度內
 - **即時資料新鮮度** — 資料時間戳即時更新；超過 30 分鐘未更新顯示橘色
 - **點擊開啟** — 點一下 widget 即啟動並帶出 App 視窗
-- 區分兩種離線狀態：**「伺服器離線」**（App 無法連線）vs **「等待資料」**（Server 啟動中，尚未收到資料）
+- 區分兩種空狀態：**「尚未有資料」**（App 尚未發佈資料，點一下開啟）vs **「等待資料」**（App 運行中，尚未收到用量資料）
 - **歷史圖表**（Medium：4 小時折線，Large：12 小時雙線圖）
   - Y 軸動態縮放至實際資料範圍，便於閱讀
   - 資料中斷時（如 App 重啟）自動斷線
   - 中斷區間會**同時回填** 5 小時與每週兩條線，收集紀錄時每週線不再是空白/0
-  - 歷史記錄儲存至 `~/.claude/widget-history.json`，重啟不遺失
+  - 歷史記錄儲存於共享的 App Group 容器，重啟不遺失
 - **主視窗即時顯示用量** — 顯示目前 5h/每週用量 %，每 2 秒更新，顏色隨用量變化
 - **Widget 選取預覽使用真實資料** — 桌面編輯小工具時顯示實際用量，而非假資料
 - **開機自動啟動**切換開關，內建於 App（無需手動設定 launchd）
@@ -34,7 +34,7 @@
 - macOS 26+
 - 已登入 Apple ID 的 Xcode（**Xcode → Settings → Accounts**）
 
-> 不需要額外的 dashboard 伺服器 — HTTP server 直接運行在 App 內部。
+> 不需要額外的 dashboard 伺服器 — App 透過 App Group 共享容器把資料傳給 widget。
 
 ## 安裝步驟
 
@@ -82,13 +82,13 @@ git pull && ./deploy.sh
 
 ## 運作原理
 
-App 在 `http://127.0.0.1:8787` 啟動一個嵌入式 HTTP server（僅綁定 loopback，流量不離開本機）。Widget 每次刷新時從 `/api/usage` 和 `/api/history` 取得資料。Server 以檔案系統事件監聽 `~/.claude/usage-cache.json`，檔案變動時即時解析並快取；`/api/usage` 請求直接從記憶體快取回應（不需每次讀磁碟）。
+App 與 widget 透過 macOS **App Group** 共享容器傳遞資料。App 以檔案系統事件監聽 `~/.claude/usage-cache.json`，每次變動就把解析後的用量與歷史寫進共享容器，再請 WidgetKit 刷新。Widget 直接讀這兩個檔（`usage.json`、`history.json`），完全不經過網路。
 
-為了安全，Server 僅回應 `Host` 為 loopback（`127.0.0.1:8787` / `localhost:8787`）的請求，且不送出 CORS header，因此任何網頁都無法透過瀏覽器讀取你的用量資料（可擋 DNS rebinding）。
+這比先前的做法（內嵌 loopback HTTP server）更安全也更標準：容器由 code signing + App Group entitlement 把關，只有「同一團隊簽章」的本 App 與其 widget 能存取，其他本機 process 都碰不到；widget 也不再需要網路權限，而且沒有需要常駐的 server（重開機後不會再出現「伺服器離線」狀態）。
 
 **Claude Code 2.1.196+** 停止自動寫入此檔案。內附的 `Stop` hook（`refresh-usage-cache.sh`）彌補了這個缺口：每次 Claude Code 回應後，hook 會發送一個最小化的 API 請求，擷取 rate-limit header 並寫入快取。若快取不到 10 分鐘，則跳過 API 呼叫。
 
-歷史記錄保留在記憶體中，每 5 分鐘及 App 退出時寫入 `~/.claude/widget-history.json`，確保重啟後不遺失。當出現取樣中斷（App 關閉、機器休眠）時，Server 會為 5 小時與每週兩條線回填內插點——每週採「沿用上一個已知值」——因此兩條線在補資料期間都不會顯示為 0。
+歷史記錄保留在記憶體中，每 5 分鐘及 App 退出時寫入共享容器，確保重啟後不遺失。當出現取樣中斷（App 關閉、機器休眠）時，App 會為 5 小時與每週兩條線回填內插點——每週採「沿用上一個已知值」——因此兩條線在補資料期間都不會顯示為 0。
 
 ## 注意事項
 

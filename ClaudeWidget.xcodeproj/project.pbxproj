@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		032BD46C6E8F3DA4EB403892 /* SharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0616864E265EE90FF07FD73D /* SharedStore.swift */; };
 		19D939493FF6B366161CAC7E /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C9C94E2816E0E27C5DF044 /* Theme.swift */; };
 		3960D24E7E041FAB7EABE421 /* ClaudeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD5959A3981C8E5F37BF1F1B /* ClaudeWidget.swift */; };
 		609F76A0AD06355A1DE31783 /* UsageServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A06E2C90CDA15110115D44 /* UsageServer.swift */; };
@@ -14,6 +15,7 @@
 		86FA28C0126E716FE1CB66E7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3D432BCAC8B16CB719D549DC /* Assets.xcassets */; };
 		96C3CEBBE2E0247CE76830F9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 653282C7375FCE6EAB3AE4FC /* Assets.xcassets */; };
 		C61D25C71F3C711BA77B9540 /* AppMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B97D095134B04B511723FF2 /* AppMain.swift */; };
+		C6C1698C4B6DAEBCA8604FE6 /* SharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0616864E265EE90FF07FD73D /* SharedStore.swift */; };
 		D28B4BB6E03C788AC318C744 /* ClaudeWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 23C35875A4E59F36E0073E3C /* ClaudeWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F04D2B6A2E5FCD33B564EC04 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C9C94E2816E0E27C5DF044 /* Theme.swift */; };
 /* End PBXBuildFile section */
@@ -43,6 +45,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0616864E265EE90FF07FD73D /* SharedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedStore.swift; sourceTree = "<group>"; };
 		19F3F8D8EBA1B18F08850DD9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		23C35875A4E59F36E0073E3C /* ClaudeWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ClaudeWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		3D432BCAC8B16CB719D549DC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -93,6 +96,7 @@
 		E40A404B5BACB6D17538C3A8 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				0616864E265EE90FF07FD73D /* SharedStore.swift */,
 				A8C9C94E2816E0E27C5DF044 /* Theme.swift */,
 			);
 			path = Shared;
@@ -215,6 +219,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3960D24E7E041FAB7EABE421 /* ClaudeWidget.swift in Sources */,
+				C6C1698C4B6DAEBCA8604FE6 /* SharedStore.swift in Sources */,
 				F04D2B6A2E5FCD33B564EC04 /* Theme.swift in Sources */,
 				70323F54ABB620C1644101DE /* widgetBundle.swift in Sources */,
 			);
@@ -225,6 +230,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C61D25C71F3C711BA77B9540 /* AppMain.swift in Sources */,
+				032BD46C6E8F3DA4EB403892 /* SharedStore.swift in Sources */,
 				19D939493FF6B366161CAC7E /* Theme.swift in Sources */,
 				609F76A0AD06355A1DE31783 /* UsageServer.swift in Sources */,
 			);

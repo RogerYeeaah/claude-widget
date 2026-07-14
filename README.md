@@ -16,12 +16,12 @@ A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/
 - **Push-based refresh** — the app reloads the widget the moment `usage-cache.json` changes; a fallback timeline refresh runs every 15 minutes (5 minutes when offline), staying well within WidgetKit's daily budget
 - **Live age indicator** — data freshness text updates in real time; turns orange after 30 minutes
 - **Tap to open** — clicking the widget launches and surfaces the app window
-- Distinguishes two offline states: **「伺服器離線」** (Server offline — app unreachable) vs **「等待資料」** (Waiting for data — server up, no data yet)
+- Distinguishes two empty states: **「尚未有資料」** (no data yet — the app hasn't published; tap to open it) vs **「等待資料」** (app running, no usage data yet)
 - **History chart** (Medium: 4h sparkline, Large: 12h dual-line chart)
   - Dynamic Y-axis scaled to actual data range for clear visibility
   - Line breaks on gaps (e.g. after app restart)
   - Back-fills gaps for **both** the 5h and weekly lines, so the weekly line isn't blank while collecting history
-  - History persists across restarts (`~/.claude/widget-history.json`)
+  - History persists across restarts (in the shared App Group container)
 - **App window shows live usage** — the companion window displays current 5h/weekly % with color coding, updated every 2 seconds
 - **Widget gallery preview uses real data** — shows your actual usage instead of placeholder values
 - **Launch at login** toggle built into the app (no manual launchd setup)
@@ -34,7 +34,7 @@ A native macOS WidgetKit widget that shows your [Claude Code](https://claude.ai/
 - macOS 26+
 - Xcode with your Apple ID signed in (**Xcode → Settings → Accounts**)
 
-> No separate dashboard server needed — the HTTP server runs inside the app itself.
+> No separate dashboard server needed — the app shares data with the widget through an App Group container.
 
 ## Setup
 
@@ -82,13 +82,13 @@ git pull && ./deploy.sh
 
 ## How it works
 
-The app runs an embedded HTTP server on `http://127.0.0.1:8787` (loopback only — traffic never leaves the machine). The widget fetches `/api/usage` and `/api/history` from it on each refresh. The server watches `~/.claude/usage-cache.json` with a file-system event source and pre-parses it on change; `/api/usage` responses are served from an in-memory cache (no disk read per request).
+The app and the widget share data through a macOS **App Group** container. The app watches `~/.claude/usage-cache.json` with a file-system event source and, on each change, writes the parsed usage and history into the shared container, then asks WidgetKit to reload. The widget reads those two files (`usage.json`, `history.json`) directly — no networking involved.
 
-For safety, the server only answers requests whose `Host` header is loopback (`127.0.0.1:8787` / `localhost:8787`) and sends no CORS header, so no web page can read your usage data through the browser (blocks DNS-rebinding access).
+This is both safer and more standard than the previous approach (an embedded loopback HTTP server): the container is gated by code signing + the App Group entitlement, so only this app and its widget — signed by the same team — can access it. No other local process can reach the data, the widget needs no network entitlement, and there's no server to keep running (so it survives reboots without a "server offline" state).
 
 **Claude Code 2.1.196+** stopped writing this file automatically. The included `Stop` hook (`refresh-usage-cache.sh`) fills the gap: after each Claude Code response it makes a minimal API call, extracts the rate-limit headers, and writes them to the cache. The hook skips the API call if the cache is less than 10 minutes old.
 
-History is accumulated in memory and flushed to `~/.claude/widget-history.json` every 5 minutes and on app quit, so it survives restarts. When a sampling gap appears (app was closed, machine asleep), the server back-interpolates points for both the 5h and weekly series — carrying forward the last known weekly value — so neither line reads as zero while catching up.
+History is accumulated in memory and flushed to the shared container every 5 minutes and on app quit, so it survives restarts. When a sampling gap appears (app was closed, machine asleep), the app back-interpolates points for both the 5h and weekly series — carrying forward the last known weekly value — so neither line reads as zero while catching up.
 
 ## Notes
 

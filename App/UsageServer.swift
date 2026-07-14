@@ -1,13 +1,15 @@
 import Foundation
-import Network
 import WidgetKit
+import UserNotifications
 
+// Reads Claude Code's usage-cache.json, accumulates history, and publishes both usage and
+// history into the shared App Group container for the widget to read directly.
+// (Previously this hosted a loopback HTTP server; App Group replaces that entirely.)
 final class UsageServer {
     static let shared = UsageServer()
 
     // MARK: - Constants (#16)
     private enum C {
-        static let port: UInt16 = 8787
         static let minSampleIntervalMs: Double = 600_000     // 10 min
         static let backfillStepMs: Double     = 600_000     // 10 min
         static let fiveHourWindowMs: Double   = 18_000_000  // 5 h
@@ -20,74 +22,42 @@ final class UsageServer {
     }
 
     // All mutable state lives on `queue`
-    private var listener: NWListener?
     private var history: [[String: Any]] = []
     private var lastHistoryTs: Double = 0
-    private let queue = DispatchQueue(label: "usage-server", qos: .utility)
+    private let queue = DispatchQueue(label: "usage-store", qos: .utility)
     private var cacheSource: DispatchSourceFileSystemObject?
     private var pendingReload: DispatchWorkItem?
-    private var cachedUsageResponse: Data?
     private var lastSaveHistoryTs: Double = 0
-    private var _isRunning = false
+    private var _ready = false
     private var _currentFive: Double?
     private var _currentSeven: Double?
+    // #E1: reset time of the window we last notified for, so each window alerts at most once
+    private var notifiedFiveWindow: Double?
+    private var notifiedSevenWindow: Double?
 
-    private let usageCacheURL: URL
-    private let historyFileURL: URL
+    private let usageCacheURL: URL  // Claude Code writes this; we read it
 
     private init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         usageCacheURL = home.appendingPathComponent(".claude/usage-cache.json")
-        historyFileURL = home.appendingPathComponent(".claude/widget-history.json")
         // `history` is queue-confined state and init runs on the main thread, so load
         // it on the queue (also keeps file I/O off the main thread during app launch).
         queue.async { [weak self] in self?.loadHistory() }
     }
 
     // #6: Thread-safe read — safe to call from any thread (including MainActor).
-    var snapshot: (running: Bool, five: Double?, seven: Double?) {
-        queue.sync { (_isRunning, _currentFive, _currentSeven) }
+    var snapshot: (ready: Bool, five: Double?, seven: Double?) {
+        queue.sync { (_ready, _currentFive, _currentSeven) }
     }
 
     // MARK: - Start
 
-    // Called from App.init() on the main thread; hop onto `queue` so all mutable
-    // state (listener, cacheSource, _isRunning) is only ever touched there.
+    // Called from App.init() on the main thread; hop onto `queue` so all mutable state is
+    // only ever touched there.
     func start() {
-        queue.async { [weak self] in self?.startOnQueue() }
-    }
-
-    private func startOnQueue() {
-        let params = NWParameters.tcp
-        params.allowLocalEndpointReuse = true
-        // #1: Bind to loopback — widget traffic never leaves this machine
-        params.requiredLocalEndpoint = NWEndpoint.hostPort(
-            host: .ipv4(.loopback),
-            port: NWEndpoint.Port(rawValue: C.port)!)
-        guard let listener = try? NWListener(using: params) else { return }
-        self.listener = listener
-
-        listener.stateUpdateHandler = { [weak self] state in
-            guard let self else { return }
-            switch state {
-            case .ready:
-                self._isRunning = true
-                self.scheduleWidgetReload()  // #4: Push fresh timeline when server comes up
-            case .failed:
-                self._isRunning = false
-                self.listener?.cancel()
-                self.listener = nil
-                // #5b: Retry listener after 5 s (port may have freed up)
-                self.queue.asyncAfter(deadline: .now() + 5) { [weak self] in self?.start() }
-            default:
-                break
-            }
-        }
-        listener.newConnectionHandler = { [weak self] conn in
-            self?.handle(conn)
-        }
-        listener.start(queue: queue)
-        watchCacheFile()
+        // #E1: ask once for permission to post near-limit notifications (no-op after first grant/deny)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        queue.async { [weak self] in self?.watchCacheFile() }
     }
 
     private func watchCacheFile() {
@@ -119,57 +89,6 @@ final class UsageServer {
         let work = DispatchWorkItem { WidgetCenter.shared.reloadAllTimelines() }
         pendingReload = work
         queue.asyncAfter(deadline: .now() + 0.5, execute: work)
-    }
-
-    // MARK: - HTTP
-
-    private func handle(_ connection: NWConnection) {
-        connection.start(queue: queue)
-        // Drop half-open connections that never send a full request within 5 s, so a
-        // client that connects but stays silent can't hold connection objects forever.
-        queue.asyncAfter(deadline: .now() + 5) { [weak connection] in connection?.cancel() }
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, _, _ in
-            guard let self, let data, !data.isEmpty else { connection.cancel(); return }
-            let request = String(data: data, encoding: .utf8) ?? ""
-            // Reject requests whose Host isn't loopback — blocks DNS-rebinding attacks
-            // where a malicious site resolves its name to 127.0.0.1 and reaches us via the browser.
-            let response = self.isValidHost(request)
-                ? self.buildResponse(for: self.extractPath(from: request))
-                : self.forbiddenResponse()
-            connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
-        }
-    }
-
-    private func isValidHost(_ request: String) -> Bool {
-        guard let hostLine = request
-            .split(separator: "\r\n", omittingEmptySubsequences: true)
-            .first(where: { $0.lowercased().hasPrefix("host:") }) else { return false }
-        let host = hostLine.dropFirst("host:".count).trimmingCharacters(in: .whitespaces).lowercased()
-        return host == "127.0.0.1:\(C.port)" || host == "localhost:\(C.port)"
-    }
-
-    private func extractPath(from request: String) -> String {
-        let firstLine = request.prefix(while: { $0 != "\r" && $0 != "\n" })
-        let parts = firstLine.split(separator: " ")
-        guard parts.count >= 2 else { return "/" }
-        return String(parts[1]).components(separatedBy: "?").first ?? "/"
-    }
-
-    private func buildResponse(for path: String) -> Data {
-        let body: Data
-        switch path {
-        case "/api/usage":   body = makeUsageJSON()
-        case "/api/history": body = makeHistoryJSON()
-        default:             body = Data("{}".utf8)
-        }
-        // No CORS header: the widget uses URLSession (not a browser), so cross-origin
-        // reads are never needed. Omitting it stops any web page from reading usage data.
-        let header = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: \(body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
-        return Data(header.utf8) + body
-    }
-
-    private func forbiddenResponse() -> Data {
-        Data("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
     }
 
     // MARK: - Usage (#12 Codable for usage-cache.json)
@@ -207,10 +126,8 @@ final class UsageServer {
               let cache = try? JSONDecoder().decode(UsageCacheFile.self, from: data),
               let rateLimits = cache.rateLimits
         else {
-            // #3: Partial-write guard — keep last valid response rather than replacing with empty
-            if cachedUsageResponse == nil {
-                cachedUsageResponse = Data(#"{"claude":{"fetchedAt":null,"five":null,"seven":null}}"#.utf8)
-            }
+            // #3: Partial-write guard — a bad/partial read keeps the last published usage.json
+            // rather than overwriting it with empty data.
             return
         }
 
@@ -226,21 +143,51 @@ final class UsageServer {
         let seven = normalize(rateLimits.sevenDay)
         _currentFive  = five?["used"]  as? Double
         _currentSeven = seven?["used"] as? Double
+        _ready = true
 
         let claude: [String: Any] = [
             "fetchedAt": cache.fetchedAt ?? NSNull(),
             "five":  five  ?? NSNull(),
             "seven": seven ?? NSNull()
         ]
-        cachedUsageResponse = try? JSONSerialization.data(withJSONObject: ["claude": claude])
+        publishUsage(["claude": claude])
         appendHistory(five: _currentFive, seven: _currentSeven,
                       fiveResetAt: five?["resetAt"] as? Double,
                       sevenResetAt: seven?["resetAt"] as? Double)
+        checkThresholds(five: _currentFive, fiveResetAt: five?["resetAt"] as? Double,
+                        seven: _currentSeven, sevenResetAt: seven?["resetAt"] as? Double)
     }
 
-    private func makeUsageJSON() -> Data {
-        if cachedUsageResponse == nil { rebuildUsageCache() }
-        return cachedUsageResponse ?? Data(#"{"claude":{"fetchedAt":null,"five":null,"seven":null}}"#.utf8)
+    // Write the current usage into the shared container (atomic) for the widget to read.
+    private func publishUsage(_ obj: [String: Any]) {
+        guard let url = SharedStore.usageURL,
+              let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    // MARK: - Threshold notifications (#E1)
+
+    private func checkThresholds(five: Double?, fiveResetAt: Double?,
+                                 seven: Double?, sevenResetAt: Double?) {
+        notify(used: five, resetAt: fiveResetAt, threshold: 85,
+               label: "5 小時", lastWindow: &notifiedFiveWindow)
+        notify(used: seven, resetAt: sevenResetAt, threshold: 90,
+               label: "每週", lastWindow: &notifiedSevenWindow)
+    }
+
+    // Fire at most once per window: resetAt identifies the window, so a new window (new resetAt)
+    // re-arms automatically and no persistent state is needed.
+    private func notify(used: Double?, resetAt: Double?, threshold: Double,
+                        label: String, lastWindow: inout Double?) {
+        guard let u = used, u >= threshold, let reset = resetAt, lastWindow != reset else { return }
+        lastWindow = reset
+        let content = UNMutableNotificationContent()
+        content.title = "Claude \(label)額度已達 \(Int(u.rounded()))%"
+        let resetTime = Date(timeIntervalSince1970: reset / 1000)
+            .formatted(date: .omitted, time: .shortened)
+        content.body = "額度將於 \(resetTime) 重置"
+        let req = UNNotificationRequest(identifier: "\(label)-\(reset)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
     }
 
     // MARK: - History
@@ -261,9 +208,18 @@ final class UsageServer {
                 guard five != nil, let resetAt = fiveResetAt else { return nil }
                 return max(backfillFrom, resetAt - C.fiveHourWindowMs)
             }()
-            // #10b: Find last history point that actually carries each value
-            let startFive  = history.reversed().first(where: { $0["five"]  != nil })?["five"]  as? Double ?? 0.0
-            let startSeven = history.reversed().first(where: { $0["seven"] != nil })?["seven"] as? Double
+            // #10b: Find the last history point that actually carries each value
+            let lastFivePt  = history.reversed().first(where: { $0["five"]  != nil })
+            let lastSevenPt = history.reversed().first(where: { $0["seven"] != nil })
+            // If the last five sample belongs to a *previous* 5h window (its ts is before the
+            // current window start), the new window must ramp from 0 — not from the old value.
+            let startFive: Double = {
+                guard let p = lastFivePt, let v = p["five"] as? Double else { return 0 }
+                if let from = fiveFrom, (p["ts"] as? Double ?? 0) < from { return 0 }
+                return v
+            }()
+            let startSeven  = lastSevenPt?["seven"] as? Double
+            let lastSevenTs = lastSevenPt?["ts"]    as? Double ?? 0
             // sevenResetAt is the *next* weekly reset; the last one is 7 days earlier
             let lastSevenResetMs = sevenResetAt.map { $0 - C.sevenDayWindowMs }
 
@@ -277,13 +233,14 @@ final class UsageServer {
                 }
 
                 if let currentSeven = seven {
-                    if let resetMs = lastSevenResetMs, resetMs > backfillFrom, resetMs < now {
-                        // gap crosses the weekly reset: hold the old value before it,
-                        // then ramp from 0 to current after it
-                        if t < resetMs {
-                            if let s = startSeven { point["seven"] = s }
-                        } else {
+                    // If a weekly reset happened since the last known sample, anchor the ramp at
+                    // the reset (0 → current) and hold the old value only before it. This also
+                    // covers a reset that fell outside the 8h backfill cap.
+                    if let resetMs = lastSevenResetMs, resetMs < now, lastSevenTs < resetMs {
+                        if t >= resetMs {
                             point["seven"] = currentSeven * ((t - resetMs) / (now - resetMs))
+                        } else if let s = startSeven {
+                            point["seven"] = s
                         }
                     } else {
                         // normal case: interpolate old → current; with no old value, hold current
@@ -309,14 +266,11 @@ final class UsageServer {
         }
     }
 
-    private func makeHistoryJSON() -> Data {
-        (try? JSONSerialization.data(withJSONObject: ["points": history]))
-            ?? Data(#"{"points":[]}"#.utf8)
-    }
-
     private func loadHistory() {
-        guard let data = try? Data(contentsOf: historyFileURL),
-              let pts = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
+        guard let url = SharedStore.historyURL,
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let pts = json["points"] as? [[String: Any]] else { return }
         let cutoff = Date().timeIntervalSince1970 * 1000 - 86_400_000
         history = pts.filter { ($0["ts"] as? Double ?? 0) > cutoff }
         lastHistoryTs = history.last?["ts"] as? Double ?? 0
@@ -325,7 +279,10 @@ final class UsageServer {
     func flush() { queue.sync { saveHistory() } }
 
     private func saveHistory() {
-        guard let data = try? JSONSerialization.data(withJSONObject: history) else { return }
-        try? data.write(to: historyFileURL)
+        guard let url = SharedStore.historyURL,
+              let data = try? JSONSerialization.data(withJSONObject: ["points": history]) else { return }
+        // .atomic: write to a temp file then rename, so a crash mid-write can't leave a
+        // truncated JSON that loadHistory would fail to decode (losing all history).
+        try? data.write(to: url, options: .atomic)
     }
 }

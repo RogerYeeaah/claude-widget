@@ -43,30 +43,21 @@ struct UsageData {
     )
 
     static func fetch() async -> UsageData {
-        guard let usageURL   = URL(string: "http://127.0.0.1:8787/api/usage"),
-              let historyURL = URL(string: "http://127.0.0.1:8787/api/history")
-        else { return .empty }
+        // Read directly from the shared App Group container (no HTTP server).
+        let usage = SharedStore.usageURL.flatMap   { try? Data(contentsOf: $0) }
+        let hist  = SharedStore.historyURL.flatMap { try? Data(contentsOf: $0) }
 
-        async let usageData   = fetchRaw(usageURL)
-        async let historyData = fetchRaw(historyURL)
-        let (usage, hist) = await (usageData, historyData)
-
-        let serverReachable = usage != nil  // HTTP success → server is up
+        // usage.json present → the app has published data at least once ("reachable");
+        // absent → app hasn't run yet, show the "open the app" state.
+        let reachable = usage != nil
         let parsed = parseUsage(usage)
         return UsageData(
             claudeFive:      parsed.0,
             claudeSeven:     parsed.1,
             fetchedAt:       parsed.2,
             history:         parseHistory(hist),
-            serverReachable: serverReachable
+            serverReachable: reachable
         )
-    }
-
-    private static func fetchRaw(_ url: URL) async -> Data? {
-        do {
-            let (data, _) = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 5))
-            return data
-        } catch { return nil }
     }
 
     private static func parseUsage(_ data: Data?) -> (UsageWindow?, UsageWindow?, Date?) {
@@ -432,8 +423,8 @@ struct OfflineView: View {
             HStack {
                 Spacer()
                 VStack(spacing: 6) {
-                    Image(systemName: "server.rack").font(.system(size: 22)).foregroundStyle(.secondary)
-                    Text("伺服器離線").font(.caption).foregroundStyle(.secondary)
+                    Image(systemName: "app.dashed").font(.system(size: 22)).foregroundStyle(.secondary)
+                    Text("尚未有資料").font(.caption).foregroundStyle(.secondary)
                     // #U3: tell the user how to recover (widgetURL below launches the app)
                     Text("點擊開啟 ClaudeWidget").font(.caption2).foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)

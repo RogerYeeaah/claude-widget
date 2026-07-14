@@ -223,7 +223,7 @@ struct MenuContent: View {
 struct ContentView: View {
     let updater: Updater
     @State private var isLoginItem = SMAppService.mainApp.status == .enabled
-    @State private var serverRunning = false
+    @State private var dataReady = false
     @State private var currentFive: Double?
     @State private var currentSeven: Double?
 
@@ -231,9 +231,9 @@ struct ContentView: View {
 
     private func refreshSnapshot() {
         let snap = UsageServer.shared.snapshot  // #6: thread-safe read via queue.sync
-        serverRunning = snap.running
-        currentFive   = snap.five
-        currentSeven  = snap.seven
+        dataReady    = snap.ready
+        currentFive  = snap.five
+        currentSeven = snap.seven
     }
 
     var body: some View {
@@ -244,9 +244,8 @@ struct ContentView: View {
             Text("Claude 用量 Widget")
                 .font(.headline)
             HStack(spacing: 6) {
-                Circle().fill(serverRunning ? Color.green : Color.orange).frame(width: 8, height: 8)
-                // #U7: neutral wording — the server can be down for reasons other than a port clash
-                Text(serverRunning ? "伺服器運行中 :8787" : "伺服器未運行（每 5 秒自動重試）")
+                Circle().fill(dataReady ? Color.green : Color.orange).frame(width: 8, height: 8)
+                Text(dataReady ? "用量資料已同步" : "等待 Claude Code 用量資料…")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

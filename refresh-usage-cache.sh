@@ -4,6 +4,12 @@
 
 CACHE="$HOME/.claude/usage-cache.json"
 
+# Prevent concurrent Stop hooks (multiple Claude Code sessions ending at once) from racing
+# on the same cache file — mkdir is atomic; if another run already holds the lock, skip.
+LOCK="$HOME/.claude/.refresh-usage.lock.d"
+mkdir "$LOCK" 2>/dev/null || exit 0
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
 # Skip if cache is fresh (< 600 seconds old)
 if [ -f "$CACHE" ]; then
     FETCHED_AT=$(CACHE="$CACHE" python3 -c "import json, os; print(json.load(open(os.environ['CACHE'])).get('fetchedAt', 0))" 2>/dev/null || echo 0)
@@ -43,7 +49,7 @@ curl -s -D "$TMPFILE" -o /dev/null \
 
 # Parse headers and write cache
 python3 - <<EOF
-import re, json, time, os, sys
+import re, json, time, os, sys, tempfile
 
 headers = open('$TMPFILE').read()
 os.unlink('$TMPFILE')
@@ -74,6 +80,11 @@ cache = {
     }
 }
 
-with open(os.path.expanduser('~/.claude/usage-cache.json'), 'w') as f:
+# Atomic write: write a temp file in the same dir then rename, so the Swift file-watcher
+# never reads a half-written file and concurrent writers can't interleave.
+path = os.path.expanduser('~/.claude/usage-cache.json')
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+with os.fdopen(fd, 'w') as f:
     json.dump(cache, f)
+os.replace(tmp, path)
 EOF
