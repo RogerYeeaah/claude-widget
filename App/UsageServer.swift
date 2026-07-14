@@ -14,7 +14,6 @@ final class UsageServer {
         static let backfillStepMs: Double     = 600_000     // 10 min
         static let fiveHourWindowMs: Double   = 18_000_000  // 5 h
         static let gapThresholdMs: Double     = 600_000     // 10 min gap → backfill
-        static let saveIntervalMs: Double     = 300_000     // 5 min
         static let maxHistoryPoints           = 300         // ~2 days at 10-min granularity
         static let backfillLeadMs: Double     = 15_000      // stop backfill 15 s before now
         static let sevenDayWindowMs: Double   = 604_800_000 // 7 d
@@ -27,7 +26,6 @@ final class UsageServer {
     private let queue = DispatchQueue(label: "usage-store", qos: .utility)
     private var cacheSource: DispatchSourceFileSystemObject?
     private var pendingReload: DispatchWorkItem?
-    private var lastSaveHistoryTs: Double = 0
     private var _ready = false
     private var _currentFive: Double?
     private var _currentSeven: Double?
@@ -156,6 +154,9 @@ final class UsageServer {
                       sevenResetAt: seven?["resetAt"] as? Double)
         checkThresholds(five: _currentFive, fiveResetAt: five?["resetAt"] as? Double,
                         seven: _currentSeven, sevenResetAt: seven?["resetAt"] as? Double)
+        // Flush history alongside usage.json so the widget's chart stays in sync with the
+        // live number (cache updates are ~10 min apart, so writing every time is cheap).
+        saveHistory()
     }
 
     // Write the current usage into the shared container (atomic) for the widget to read.
@@ -260,10 +261,7 @@ final class UsageServer {
         if let seven { point["seven"] = seven }
         history.append(point)
         if history.count > C.maxHistoryPoints { history.removeFirst(history.count - C.maxHistoryPoints) }
-        if now - lastSaveHistoryTs >= C.saveIntervalMs {
-            lastSaveHistoryTs = now
-            saveHistory()
-        }
+        // (saveHistory is called by rebuildUsageCache after each update — see there)
     }
 
     private func loadHistory() {

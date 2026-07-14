@@ -88,7 +88,7 @@ This is both safer and more standard than the previous approach (an embedded loo
 
 **Claude Code 2.1.196+** stopped writing this file automatically. The included `Stop` hook (`refresh-usage-cache.sh`) fills the gap: after each Claude Code response it makes a minimal API call, extracts the rate-limit headers, and writes them to the cache. The hook skips the API call if the cache is less than 10 minutes old.
 
-History is accumulated in memory and flushed to the shared container every 5 minutes and on app quit, so it survives restarts. When a sampling gap appears (app was closed, machine asleep), the app back-interpolates points for both the 5h and weekly series — carrying forward the last known weekly value — so neither line reads as zero while catching up.
+History is accumulated in memory and written to the shared container on every update (and on app quit), so the chart stays in sync with the live number and survives restarts. When a sampling gap appears (app was closed, machine asleep), the app back-interpolates points for both the 5h and weekly series — carrying forward the last known weekly value — so neither line reads as zero while catching up.
 
 ## Notes
 
