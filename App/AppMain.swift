@@ -156,7 +156,6 @@ struct ClaudeUsageApp: App {
 
     init() {
         UsageServer.shared.start()
-        MouseLabView.initializeOnStartup()
     }
 
     var body: some Scene {
@@ -305,6 +304,7 @@ struct ContentView: View {
         .onAppear {
             refreshSnapshot()
             updater.check()  // #21b: Check for updates whenever window opens
+            MouseLabView.initializeOnStartup()
         }
         .onDisappear {
             NSApp.setActivationPolicy(.accessory)

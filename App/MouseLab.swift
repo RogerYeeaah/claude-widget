@@ -79,7 +79,9 @@ class MouseLabManager {
     
     init() {
         loadTracksFromDefaults()
-        setupHotkeys()
+        DispatchQueue.main.async {
+            self.setupHotkeys()
+        }
     }
     
     var isAccessibilityEnabled: Bool {
