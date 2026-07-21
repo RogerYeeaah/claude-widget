@@ -11,12 +11,17 @@ fi
 
 # 2. Generate Xcode project
 echo "Generating Xcode project..."
-# Detect and handle MouseLab component stubbing
 if [ ! -f "App/MouseLab.swift" ]; then
   echo "Creating MouseLabStub.swift..."
   echo -e "import SwiftUI\n\nstruct MouseLabView: View {\n    static let isAvailable = false\n    static func initializeOnStartup() {}\n    var body: some View {\n        Text(\"MouseLab is not installed\")\n    }\n}" > App/MouseLabStub.swift
 else
   rm -f App/MouseLabStub.swift
+fi
+
+# Detect and handle MouseLabConfig personal overrides
+if [ ! -f "App/MouseLabConfig.swift" ]; then
+  echo "Creating default MouseLabConfig.swift..."
+  echo -e "import Foundation\n\nstruct MouseLabConfig {\n    static let isEnabled = false\n}" > App/MouseLabConfig.swift
 fi
 
 xcodegen generate --quiet

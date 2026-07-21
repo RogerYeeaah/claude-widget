@@ -11,6 +11,7 @@
 		19D939493FF6B366161CAC7E /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C9C94E2816E0E27C5DF044 /* Theme.swift */; };
 		3960D24E7E041FAB7EABE421 /* ClaudeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD5959A3981C8E5F37BF1F1B /* ClaudeWidget.swift */; };
 		609F76A0AD06355A1DE31783 /* UsageServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A06E2C90CDA15110115D44 /* UsageServer.swift */; };
+		63712E76510F5340D5EB2FFE /* MouseLabConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 508190A63302EA1652B289D7 /* MouseLabConfig.swift */; };
 		70323F54ABB620C1644101DE /* widgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78B3D6070587F190A48E0D70 /* widgetBundle.swift */; };
 		810FB2A156956DB18D04CE55 /* MouseLab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D42F9489E8B1A01DC2F09A0 /* MouseLab.swift */; };
 		86FA28C0126E716FE1CB66E7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3D432BCAC8B16CB719D549DC /* Assets.xcassets */; };
@@ -50,6 +51,7 @@
 		19F3F8D8EBA1B18F08850DD9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		23C35875A4E59F36E0073E3C /* ClaudeWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ClaudeWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		3D432BCAC8B16CB719D549DC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		508190A63302EA1652B289D7 /* MouseLabConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseLabConfig.swift; sourceTree = "<group>"; };
 		56CA8366E3816EBB919D9EF1 /* ClaudeWidgetApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeWidgetApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		653282C7375FCE6EAB3AE4FC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		6B6EEF3917A5366019A2E56D /* Widget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Widget.entitlements; sourceTree = "<group>"; };
@@ -72,6 +74,7 @@
 				3D432BCAC8B16CB719D549DC /* Assets.xcassets */,
 				19F3F8D8EBA1B18F08850DD9 /* Info.plist */,
 				6D42F9489E8B1A01DC2F09A0 /* MouseLab.swift */,
+				508190A63302EA1652B289D7 /* MouseLabConfig.swift */,
 				E4A06E2C90CDA15110115D44 /* UsageServer.swift */,
 			);
 			path = App;
@@ -234,6 +237,7 @@
 			files = (
 				C61D25C71F3C711BA77B9540 /* AppMain.swift in Sources */,
 				810FB2A156956DB18D04CE55 /* MouseLab.swift in Sources */,
+				63712E76510F5340D5EB2FFE /* MouseLabConfig.swift in Sources */,
 				032BD46C6E8F3DA4EB403892 /* SharedStore.swift in Sources */,
 				19D939493FF6B366161CAC7E /* Theme.swift in Sources */,
 				609F76A0AD06355A1DE31783 /* UsageServer.swift in Sources */,

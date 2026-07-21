@@ -532,10 +532,7 @@ class MouseLabManager {
 
 struct MouseLabView: View {
     static var isAvailable: Bool {
-        if UserDefaults.standard.object(forKey: "MouseLabEnabled") != nil {
-            return UserDefaults.standard.bool(forKey: "MouseLabEnabled")
-        }
-        return true
+        MouseLabConfig.isEnabled
     }
     
     static func initializeOnStartup() {
