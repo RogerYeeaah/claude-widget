@@ -360,6 +360,27 @@ class MouseLabManager {
         return blocks
     }
     
+    private func glideMouse(from start: CGPoint, to end: CGPoint, duration: TimeInterval = 0.3) async {
+        let steps = 15
+        let stepDuration = duration / Double(steps)
+        let screenHeight = NSScreen.screens.first?.frame.size.height ?? 1080
+        
+        for i in 1...steps {
+            if Task.isCancelled { break }
+            let t = Double(i) / Double(steps)
+            let easeT = t * t * (3 - 2 * t)
+            let x = start.x + (end.x - start.x) * CGFloat(easeT)
+            let y = start.y + (end.y - start.y) * CGFloat(easeT)
+            
+            let source = CGEventSource(stateID: .combinedSessionState)
+            let targetLoc = CGPoint(x: x, y: screenHeight - y)
+            let moveEvt = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: targetLoc, mouseButton: .left)
+            moveEvt?.post(tap: .cgSessionEventTap)
+            
+            try? await Task.sleep(for: .seconds(stepDuration))
+        }
+    }
+    
     // MARK: - Playback Control
     
     func startPlayback() {
@@ -383,6 +404,18 @@ class MouseLabManager {
                     for (blockIndex, block) in blocks.enumerated() {
                         if Task.isCancelled { break }
                         self.addLog("開始執行操作區塊 [\(blockIndex + 1)/\(blocks.count)]")
+                        
+                        // Glide mouse to block starting location if different from current
+                        if let firstLocEvent = block.events.first(where: { $0.location != nil }),
+                           let startLoc = firstLocEvent.location {
+                            let currentLoc = NSEvent.mouseLocation
+                            let dx = startLoc.x - currentLoc.x
+                            let dy = startLoc.y - currentLoc.y
+                            let distance = sqrt(dx*dx + dy*dy)
+                            if distance > 2 {
+                                await self.glideMouse(from: currentLoc, to: startLoc, duration: 0.3)
+                            }
+                        }
                         
                         guard let firstEvent = block.events.first else { continue }
                         var lastEventTime = firstEvent.timeOffset
