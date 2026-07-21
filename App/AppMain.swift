@@ -226,6 +226,7 @@ struct ContentView: View {
     @State private var dataReady = false
     @State private var currentFive: Double?
     @State private var currentSeven: Double?
+    @State private var showMouseLab = false
 
     private func barColor(_ pct: Double) -> Color { Theme.usageColor(pct, fallback: .secondary) }
 
@@ -287,6 +288,16 @@ struct ContentView: View {
                         isLoginItem = !newValue
                     }
                 }
+            if MouseLabView.isAvailable {
+                Divider()
+                Button(action: { showMouseLab = true }) {
+                    Label("開啟鍵鼠錄製面板", systemImage: "hand.tap")
+                        .font(.caption)
+                }
+                .sheet(isPresented: $showMouseLab) {
+                    MouseLabView()
+                }
+            }
         }
         .padding(32)
         .frame(width: 320)
