@@ -60,6 +60,7 @@ class MouseLabManager {
     
     // Playback Settings
     var loopPlayback: Bool = false
+    var randomizeOrder: Bool = false
     
     // Logs for console
     var consoleLogs: [String] = []
@@ -324,6 +325,33 @@ class MouseLabManager {
         }
     }
     
+    // MARK: - Segmentation Logic
+    
+    struct OperationBlock {
+        var events: [RecordedEvent]
+    }
+    
+    func segmentEvents() -> [OperationBlock] {
+        guard !recordedEvents.isEmpty else { return [] }
+        var blocks: [OperationBlock] = []
+        var currentEvents: [RecordedEvent] = []
+        var lastTime: TimeInterval = recordedEvents[0].timeOffset
+        
+        for event in recordedEvents {
+            let gap = event.timeOffset - lastTime
+            if gap > 1.0 && !currentEvents.isEmpty {
+                blocks.append(OperationBlock(events: currentEvents))
+                currentEvents = []
+            }
+            currentEvents.append(event)
+            lastTime = event.timeOffset
+        }
+        if !currentEvents.isEmpty {
+            blocks.append(OperationBlock(events: currentEvents))
+        }
+        return blocks
+    }
+    
     // MARK: - Playback Control
     
     func startPlayback() {
@@ -335,21 +363,51 @@ class MouseLabManager {
             guard let self = self else { return }
             
             repeat {
-                var lastEventTime: TimeInterval = 0
+                if Task.isCancelled { break }
                 
-                for event in self.recordedEvents {
-                    if Task.isCancelled { break }
-                    
-                    let delta = event.timeOffset - lastEventTime
-                    lastEventTime = event.timeOffset
-                    
-                    if delta > 0 {
-                        try? await Task.sleep(for: .seconds(delta))
+                if self.randomizeOrder {
+                    var blocks = self.segmentEvents()
+                    if blocks.count > 1 {
+                        blocks.shuffle()
+                        self.addLog("已隨機打亂操作順序，共有 \(blocks.count) 個操作區塊。")
                     }
                     
-                    if Task.isCancelled { break }
-                    
-                    await self.replayEvent(event)
+                    for (blockIndex, block) in blocks.enumerated() {
+                        if Task.isCancelled { break }
+                        self.addLog("開始執行操作區塊 [\(blockIndex + 1)/\(blocks.count)]")
+                        
+                        guard let firstEvent = block.events.first else { continue }
+                        var lastEventTime = firstEvent.timeOffset
+                        
+                        for event in block.events {
+                            if Task.isCancelled { break }
+                            let delta = event.timeOffset - lastEventTime
+                            lastEventTime = event.timeOffset
+                            if delta > 0 {
+                                try? await Task.sleep(for: .seconds(delta))
+                            }
+                            if Task.isCancelled { break }
+                            await self.replayEvent(event)
+                        }
+                        
+                        if blockIndex < blocks.count - 1 && !Task.isCancelled {
+                            let nextPause = Double.random(in: 0.8...1.5)
+                            try? await Task.sleep(for: .seconds(nextPause))
+                        }
+                    }
+                } else {
+                    // Exact Playback (Original timing and sequence)
+                    var lastEventTime: TimeInterval = 0
+                    for event in self.recordedEvents {
+                        if Task.isCancelled { break }
+                        let delta = event.timeOffset - lastEventTime
+                        lastEventTime = event.timeOffset
+                        if delta > 0 {
+                            try? await Task.sleep(for: .seconds(delta))
+                        }
+                        if Task.isCancelled { break }
+                        await self.replayEvent(event)
+                    }
                 }
                 
             } while self.loopPlayback && !Task.isCancelled
@@ -679,6 +737,8 @@ struct MouseLabView: View {
                         Text("2. 播放設定").font(.subheadline).bold().foregroundStyle(.secondary)
                         
                         Toggle("循環重複播放", isOn: $manager.loopPlayback)
+                            .toggleStyle(.checkbox)
+                        Toggle("隨機打亂操作順序播放還原", isOn: $manager.randomizeOrder)
                             .toggleStyle(.checkbox)
                     }
                     .padding()
