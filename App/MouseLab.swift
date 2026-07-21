@@ -540,9 +540,10 @@ struct MouseLabView: View {
         _ = MouseLabManager.shared
     }
     
-    @State private var manager = MouseLabManager.shared
+    let manager = MouseLabManager.shared
     
     var body: some View {
+        @Bindable var manager = manager
         VStack(spacing: 0) {
             // Header
             HStack {
