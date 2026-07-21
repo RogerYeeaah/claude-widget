@@ -35,6 +35,8 @@ struct RecordedEvent: Codable, Identifiable {
 
 @Observable
 class MouseLabManager {
+    static let shared = MouseLabManager()
+    
     enum Status {
         case idle
         case recording
@@ -534,7 +536,11 @@ struct MouseLabView: View {
         return true
     }
     
-    @State private var manager = MouseLabManager()
+    static func initializeOnStartup() {
+        _ = MouseLabManager.shared
+    }
+    
+    @State private var manager = MouseLabManager.shared
     
     var body: some View {
         VStack(spacing: 0) {

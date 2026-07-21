@@ -156,6 +156,7 @@ struct ClaudeUsageApp: App {
 
     init() {
         UsageServer.shared.start()
+        MouseLabView.initializeOnStartup()
     }
 
     var body: some Scene {
