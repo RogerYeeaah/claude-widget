@@ -59,8 +59,16 @@ class MouseLabManager {
     var recordedEvents: [RecordedEvent] = []
     
     // Playback Settings
-    var loopPlayback: Bool = false
-    var randomizeOrder: Bool = false
+    var loopPlayback: Bool = false {
+        didSet {
+            UserDefaults.standard.set(loopPlayback, forKey: "MouseLabLoopPlayback")
+        }
+    }
+    var randomizeOrder: Bool = false {
+        didSet {
+            UserDefaults.standard.set(randomizeOrder, forKey: "MouseLabRandomizeOrder")
+        }
+    }
     
     // Logs for console
     var consoleLogs: [String] = []
@@ -541,6 +549,8 @@ class MouseLabManager {
             selectedTrackName = lastSelected
             recordedEvents = savedTracks[lastSelected] ?? []
         }
+        self.loopPlayback = UserDefaults.standard.bool(forKey: "MouseLabLoopPlayback")
+        self.randomizeOrder = UserDefaults.standard.bool(forKey: "MouseLabRandomizeOrder")
     }
     
     // MARK: - JSON Export/Import
